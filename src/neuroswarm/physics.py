@@ -613,6 +613,67 @@ class NeuroSwarmPhysics:
             "optimal_wavelength_nm": optimal_wavelength,
         }
 
+    def _generate_input_pulses(
+        self,
+        n_steps: int,
+        dt: float,
+        rate_hz: float,
+        pulse_amplitude: float = 1.0,
+        pulse_duration_ms: float = 10.0
+    ) -> NDArray[np.float64]:
+        """
+        Generate pseudo-random input pulses.
+        """
+        total_time_s = n_steps * dt / 1000.0
+        expected_pulses = int(rate_hz * total_time_s)
+
+        pulse_times = np.random.uniform(0, n_steps * dt, expected_pulses)
+        pulse_times = np.sort(pulse_times)
+
+        input_current = np.zeros(n_steps)
+        pulse_samples = int(pulse_duration_ms / dt)
+
+        for t in pulse_times:
+            start_idx = int(t / dt)
+            end_idx = min(start_idx + pulse_samples, n_steps)
+            input_current[start_idx:end_idx] = pulse_amplitude
+
+        return input_current
+
+    def _compute_baseline_photons(self) -> float:
+        """Compute baseline (zero-field) photon count."""
+        opt = self.config.optical
+        geo = self.config.geometry
+
+        wavelength = opt.wavelength
+        photon_energy_ev = self._wavelength_to_ev(wavelength)
+
+        eps = self.dielectric.dielectric_function(np.array([photon_energy_ev]))[0]
+        Q_sca = self.scattering.scattering_efficiency(wavelength, eps)
+
+        I_inc = opt.incident_intensity * 1e-3 * 1e6  # W/m^2
+        r = geo.total_radius * 1e-9
+        wavelength_m = wavelength * 1e-9
+        t_int = opt.integration_time * 1e-3
+
+        photon_energy_J = (PLANCK_CONSTANT * SPEED_OF_LIGHT) / wavelength_m
+        C_sca = Q_sca * np.pi * r ** 2
+
+        N_ph = (
+            I_inc * C_sca * (1.0 / photon_energy_J) *
+            opt.solid_angle_fraction * opt.quantum_yield * t_int *
+            self.config.num_particles
+        )
+
+        return N_ph
+
+    @staticmethod
+    def _wavelength_to_ev(wavelength_nm: float) -> float:
+        """Convert wavelength (nm) to photon energy (eV)."""
+        h_eV_s = PLANCK_CONSTANT / EV_TO_JOULES  # Planck constant in eV*s
+        c_nm_s = SPEED_OF_LIGHT * 1e9  # Speed of light in nm/s
+        return h_eV_s * c_nm_s / wavelength_nm
+
 
 class ParticleDistribution:
     """
@@ -654,82 +715,6 @@ class ParticleDistribution:
         """
         lam = self.params.field_decay_length_um
         return np.exp(-distances_um / lam)
-
-    def _generate_input_pulses(
-        self,
-        n_steps: int,
-        dt: float,
-        rate_hz: float,
-        pulse_amplitude: float = 1.0,
-        pulse_duration_ms: float = 10.0
-    ) -> NDArray[np.float64]:
-        """
-        Generate pseudo-random input pulses.
-
-        Args:
-            n_steps: Number of time steps
-            dt: Time step (ms)
-            rate_hz: Average pulse rate (Hz)
-            pulse_amplitude: Pulse amplitude (mV equivalent)
-            pulse_duration_ms: Duration of each pulse (ms)
-
-        Returns:
-            Input current array
-        """
-        total_time_s = n_steps * dt / 1000.0
-        expected_pulses = int(rate_hz * total_time_s)
-
-        # Generate random pulse times
-        pulse_times = np.random.uniform(0, n_steps * dt, expected_pulses)
-        pulse_times = np.sort(pulse_times)
-
-        # Create input array
-        input_current = np.zeros(n_steps)
-        pulse_samples = int(pulse_duration_ms / dt)
-
-        for t in pulse_times:
-            start_idx = int(t / dt)
-            end_idx = min(start_idx + pulse_samples, n_steps)
-            input_current[start_idx:end_idx] = pulse_amplitude
-
-        return input_current
-
-    def _compute_baseline_photons(self) -> float:
-        """Compute baseline (zero-field) photon count."""
-        opt = self.config.optical
-        geo = self.config.geometry
-
-        wavelength = opt.wavelength
-        photon_energy_ev = self._wavelength_to_ev(wavelength)
-
-        # Dielectric at zero field
-        eps = self.dielectric.dielectric_function(np.array([photon_energy_ev]))[0]
-        Q_sca = self.scattering.scattering_efficiency(wavelength, eps)
-
-        # Convert to photon count
-        I_inc = opt.incident_intensity * 1e-3 * 1e6  # W/m^2
-        r = geo.total_radius * 1e-9
-        wavelength_m = wavelength * 1e-9
-        t_int = opt.integration_time * 1e-3
-
-        photon_energy_J = (PLANCK_CONSTANT * SPEED_OF_LIGHT) / wavelength_m
-        C_sca = Q_sca * np.pi * r ** 2
-
-        N_ph = (
-            I_inc * C_sca * (1.0 / photon_energy_J) *
-            opt.solid_angle_fraction * opt.quantum_yield * t_int *
-            self.config.num_particles
-        )
-
-        return N_ph
-
-    @staticmethod
-    def _wavelength_to_ev(wavelength_nm: float) -> float:
-        """Convert wavelength (nm) to photon energy (eV)."""
-        # E = hc/lambda
-        h_eV_s = PLANCK_CONSTANT / EV_TO_JOULES  # Planck constant in eV*s
-        c_nm_s = SPEED_OF_LIGHT * 1e9  # Speed of light in nm/s
-        return h_eV_s * c_nm_s / wavelength_nm
 
 
 def compress_to_integration_time(
