@@ -499,8 +499,13 @@ class TestIntegration:
         result = noise_gen.corrupt_signal(clean_signal, dt=0.1, baseline=1e5)
         noisy_signal = result["noisy_signal"]
 
-        # Decode
-        decode_params = DecodingParams(spike_threshold=4.0)
+        # Decode with Wiener + matched filter enabled
+        decode_params = DecodingParams(
+            spike_threshold=4.0,
+            use_wiener=True,
+            use_matched_filter=True,
+            matched_filter_window_ms=6.0
+        )
         extractor = SignalExtractor(decode_params)
         result = extractor.process_batch(noisy_signal, dt_ms=0.1)
 
@@ -518,6 +523,47 @@ class TestIntegration:
         # Should detect at least some spikes (even if noisy conditions are challenging)
         n_detected = len(result["spike_indices"])
         assert n_detected >= 0, "Detection should complete without error"
+
+    def test_matched_filter_improves_f1(self):
+        """Matched filter should improve F1 under heavy noise."""
+        clean_signal = np.zeros(4000)
+        true_spike_times = [300, 800, 1300, 1800, 2300, 2800, 3300, 3700]
+        for t in true_spike_times:
+            clean_signal[t:t+8] = 8000
+
+        noise_params = NoiseParams(
+            shot_noise_enabled=True,
+            thermal_noise_std=300.0,
+            drift_amplitude=0.05,
+            burst_probability=0.0,
+            seed=123
+        )
+        noise_gen = AdversarialNoiseGenerator(noise_params)
+        noisy = noise_gen.corrupt_signal(clean_signal, dt=0.1, baseline=1e5)["noisy_signal"]
+
+        true_spikes = np.zeros(len(clean_signal), dtype=bool)
+        for t in true_spike_times:
+            true_spikes[t] = True
+
+        base_params = DecodingParams(spike_threshold=4.5)
+        base_extractor = SignalExtractor(base_params)
+        base_result = base_extractor.process_batch(noisy, dt_ms=0.1)
+        base_metrics = base_extractor.evaluate_reconstruction(
+            base_result["spike_indices"], true_spikes, tolerance_samples=20
+        )
+
+        mf_params = DecodingParams(
+            spike_threshold=4.5,
+            use_matched_filter=True,
+            matched_filter_window_ms=6.0
+        )
+        mf_extractor = SignalExtractor(mf_params)
+        mf_result = mf_extractor.process_batch(noisy, dt_ms=0.1)
+        mf_metrics = mf_extractor.evaluate_reconstruction(
+            mf_result["spike_indices"], true_spikes, tolerance_samples=20
+        )
+
+        assert mf_metrics["f1_score"] >= base_metrics["f1_score"] * 1.2
 
     def test_ssnr_logging(self):
         """Test SSNR is logged for each batch."""

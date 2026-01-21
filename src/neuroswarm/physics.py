@@ -25,6 +25,8 @@ from .types import (
     NanoparticleGeometry,
     OpticalSystemParams,
     IzhikevichParams,
+    ParticleDistributionParams,
+    WavelengthSweepParams,
     PLANCK_CONSTANT,
     SPEED_OF_LIGHT,
     EV_TO_JOULES,
@@ -339,6 +341,7 @@ class NeuroSwarmPhysics:
         self.neuron = IzhikevichNeuron(self.config.neuron)
         self.dielectric = DrudeLorenzModel(self.config.drude_lorentz)
         self.scattering = MieScattering(self.config.geometry)
+        self.distribution = ParticleDistribution(self.config.distribution)
 
         logger.info(
             f"NeuroSwarmPhysics initialized: "
@@ -373,6 +376,24 @@ class NeuroSwarmPhysics:
         field = dv_dt * scale
 
         return field
+
+    def apply_spatial_distribution(
+        self,
+        base_field: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
+        """
+        Apply spatial field decay across distributed particles.
+
+        Args:
+            base_field: Base extracellular field at the membrane (mV/nm)
+
+        Returns:
+            Field array per particle, shape (n_particles, n_time)
+        """
+        distances_um = self.distribution.sample_distances(self.config.num_particles)
+        decay = self.distribution.field_decay(distances_um)
+        # Broadcast decay across time
+        return decay[:, None] * base_field[None, :]
 
     def field_to_delta_qsca(
         self,
@@ -510,7 +531,14 @@ class NeuroSwarmPhysics:
 
         # Compute scattering efficiency changes
         logger.debug("Computing scattering efficiency modulation...")
-        delta_Q = self.field_to_delta_qsca(E_field)
+        if self.config.num_particles > 1:
+            particle_fields = self.apply_spatial_distribution(E_field)
+            delta_Q = np.zeros_like(E_field)
+            for i in range(self.config.num_particles):
+                delta_Q += self.field_to_delta_qsca(particle_fields[i])
+            delta_Q /= self.config.num_particles
+        else:
+            delta_Q = self.field_to_delta_qsca(E_field)
 
         # Compute photon counts
         logger.debug("Computing differential photon counts...")
@@ -536,7 +564,96 @@ class NeuroSwarmPhysics:
             "delta_Q_sca": delta_Q,
             "delta_N_ph": delta_N_ph,
             "ssnr": ssnr,
+            "particle_distances_um": self.distribution.last_distances,
         }
+
+    def sweep_wavelengths(
+        self,
+        sweep_params: Optional[WavelengthSweepParams] = None
+    ) -> dict:
+        """
+        Sweep wavelengths to find optimal detection wavelength.
+
+        Args:
+            sweep_params: Sweep configuration. Uses defaults if None.
+
+        Returns:
+            Dictionary with wavelength array, delta_N_ph, ssnr, and optimal wavelength.
+        """
+        params = sweep_params or WavelengthSweepParams()
+        wavelengths = np.arange(
+            params.min_wavelength, params.max_wavelength + params.step_nm, params.step_nm
+        )
+        delta_n_ph = np.zeros_like(wavelengths, dtype=float)
+        ssnr = np.zeros_like(wavelengths, dtype=float)
+
+        for i, wavelength in enumerate(wavelengths):
+            self.config.optical.wavelength = float(wavelength)
+            photon_energy = self._wavelength_to_ev(wavelength)
+            delta_omega_p = self.dielectric.plasma_frequency_shift(params.electric_field)
+            eps_base = self.dielectric.dielectric_function(np.array([photon_energy]))[0]
+            eps_mod = self.dielectric.dielectric_function(
+                np.array([photon_energy]), delta_omega_p
+            )[0]
+            q_base = self.scattering.scattering_efficiency(wavelength, eps_base)
+            q_mod = self.scattering.scattering_efficiency(wavelength, eps_mod)
+            delta_q = q_mod - q_base
+            delta_n = self.calculate_photon_count(np.array([delta_q]))[0]
+            baseline = self._compute_baseline_photons()
+            delta_n_ph[i] = delta_n
+            ssnr[i] = (abs(delta_n) / baseline) * np.sqrt(baseline) if baseline > 0 else 0.0
+
+        optimal_idx = int(np.argmax(ssnr))
+        optimal_wavelength = float(wavelengths[optimal_idx])
+
+        return {
+            "wavelengths_nm": wavelengths,
+            "delta_N_ph": delta_n_ph,
+            "ssnr": ssnr,
+            "optimal_wavelength_nm": optimal_wavelength,
+        }
+
+
+class ParticleDistribution:
+    """
+    Spatial distribution model for nanoparticle probes.
+
+    Supports sphere, slab, and clustered distributions.
+    """
+
+    def __init__(self, params: ParticleDistributionParams) -> None:
+        self.params = params
+        self._rng = np.random.default_rng(params.seed)
+        self.last_distances: Optional[NDArray[np.float64]] = None
+
+    def sample_distances(self, n_particles: int) -> NDArray[np.float64]:
+        """Sample particle distances from neuron center (um)."""
+        p = self.params
+        if p.distribution_type == "sphere":
+            # Uniform distribution in sphere: r ~ U(0,1)^(1/3)
+            u = self._rng.random(n_particles)
+            distances = p.radius_um * u ** (1.0 / 3.0)
+        elif p.distribution_type == "slab":
+            distances = self._rng.uniform(0, p.slab_thickness_um, n_particles)
+        else:
+            # Clustered: mixture of two Gaussians
+            cluster_centers = self._rng.choice(
+                [p.radius_um * 0.3, p.radius_um * 0.8], size=n_particles
+            )
+            distances = cluster_centers + self._rng.normal(0, p.radius_um * 0.05, n_particles)
+            distances = np.clip(distances, 0, p.radius_um)
+
+        self.last_distances = distances
+        return distances
+
+    def field_decay(self, distances_um: NDArray[np.float64]) -> NDArray[np.float64]:
+        """
+        Compute field decay factor with distance.
+
+        Uses exponential decay: E(r) = E0 * exp(-r / lambda)
+        """
+        lam = self.params.field_decay_length_um
+        return np.exp(-distances_um / lam)
 
     def _generate_input_pulses(
         self,

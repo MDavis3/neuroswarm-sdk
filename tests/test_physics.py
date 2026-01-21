@@ -22,6 +22,8 @@ from neuroswarm.types import (
     NanoparticleGeometry,
     OpticalSystemParams,
     IzhikevichParams,
+    WavelengthSweepParams,
+    ParticleDistributionParams,
 )
 from neuroswarm.physics import (
     IzhikevichNeuron,
@@ -249,6 +251,36 @@ class TestNeuroSwarmPhysics:
 
         ssnr = result["ssnr"]
         assert ssnr > 0, "SSNR should be positive"
+
+    def test_wavelength_sweep(self):
+        """Test wavelength sweep returns optimal wavelength in NIR-II."""
+        physics = NeuroSwarmPhysics()
+        sweep = physics.sweep_wavelengths(WavelengthSweepParams(step_nm=50.0))
+
+        wavelengths = sweep["wavelengths_nm"]
+        assert wavelengths[0] >= 1000
+        assert wavelengths[-1] <= 1700
+        assert len(sweep["delta_N_ph"]) == len(wavelengths)
+        assert len(sweep["ssnr"]) == len(wavelengths)
+        assert 1000 <= sweep["optimal_wavelength_nm"] <= 1700
+
+    def test_spatial_distribution_variance(self):
+        """Test spatial distribution creates field variance across particles."""
+        config = SimulationConfig(
+            num_particles=200,
+            distribution=ParticleDistributionParams(
+                distribution_type="sphere",
+                radius_um=30.0,
+                field_decay_length_um=10.0,
+                seed=42
+            )
+        )
+        physics = NeuroSwarmPhysics(config)
+        field = np.ones(config.num_steps) * 1.0
+        particle_fields = physics.apply_spatial_distribution(field)
+
+        assert particle_fields.shape[0] == config.num_particles
+        assert np.std(particle_fields[:, 0]) > 0
 
 
 class TestCompressToIntegrationTime:

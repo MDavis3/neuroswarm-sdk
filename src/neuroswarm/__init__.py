@@ -24,10 +24,13 @@ from .types import (
     OpticalSystemParams,
     IzhikevichParams,
     SimulationConfig,
+    WavelengthSweepParams,
+    ParticleDistributionParams,
 )
 from .physics import NeuroSwarmPhysics
 from .noise import AdversarialNoiseGenerator
 from .decoding import SignalExtractor
+from .reporting import summarize_detection, noise_sweep_report, wavelength_sweep_report
 
 __all__ = [
     # Types
@@ -36,8 +39,14 @@ __all__ = [
     "OpticalSystemParams",
     "IzhikevichParams",
     "SimulationConfig",
+    "WavelengthSweepParams",
+    "ParticleDistributionParams",
     # Core classes
     "NeuroSwarmPhysics",
     "AdversarialNoiseGenerator",
     "SignalExtractor",
+    # Reporting
+    "summarize_detection",
+    "noise_sweep_report",
+    "wavelength_sweep_report",
 ]

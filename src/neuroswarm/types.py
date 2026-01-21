@@ -9,7 +9,7 @@ Reference:
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Literal
 import numpy as np
 
 
@@ -281,6 +281,7 @@ class SimulationConfig:
         duration: Total simulation duration (ms)
         max_field_strength: Maximum extracellular field (mV/nm)
         num_particles: Number of nanoparticles in detection volume
+        distribution: Particle distribution parameters
     """
     drude_lorentz: DrudeLorenzParams = field(default_factory=DrudeLorenzParams)
     geometry: NanoparticleGeometry = field(default_factory=NanoparticleGeometry)
@@ -291,6 +292,9 @@ class SimulationConfig:
     duration: float = 1000.0  # ms (total simulation time)
     max_field_strength: float = 3.0  # mV/nm (conservative estimate)
     num_particles: int = 1000  # Number of nanoparticles
+    distribution: "ParticleDistributionParams" = field(
+        default_factory=lambda: ParticleDistributionParams()
+    )
 
     def __post_init__(self) -> None:
         """Validate simulation parameters."""
@@ -316,6 +320,64 @@ class SimulationConfig:
     def time_vector(self) -> np.ndarray:
         """Time vector for simulation (ms)."""
         return np.arange(0, self.duration, self.dt)
+
+
+@dataclass
+class WavelengthSweepParams:
+    """
+    Parameters for wavelength sweep optimization in NIR-II range.
+
+    Attributes:
+        min_wavelength: Minimum wavelength to scan (nm)
+        max_wavelength: Maximum wavelength to scan (nm)
+        step_nm: Wavelength step size (nm)
+        electric_field: Fixed field strength for sweep (mV/nm)
+    """
+    min_wavelength: float = 1000.0
+    max_wavelength: float = 1700.0
+    step_nm: float = 10.0
+    electric_field: float = 3.0
+
+    def __post_init__(self) -> None:
+        if self.min_wavelength < 1000 or self.max_wavelength > 1700:
+            raise ValueError(
+                "Wavelength sweep must remain within NIR-II range (1000-1700 nm)"
+            )
+        if self.step_nm <= 0:
+            raise ValueError(f"step_nm must be positive, got {self.step_nm}")
+        if self.min_wavelength >= self.max_wavelength:
+            raise ValueError("min_wavelength must be less than max_wavelength")
+
+
+@dataclass
+class ParticleDistributionParams:
+    """
+    Parameters describing spatial distribution of nanoparticle probes.
+
+    Attributes:
+        distribution_type: 'sphere', 'slab', or 'clustered'
+        radius_um: Sphere radius (um) for distribution
+        slab_thickness_um: Slab thickness (um) if using slab
+        field_decay_length_um: Decay length for E-field (um)
+        seed: Random seed for reproducibility
+    """
+    distribution_type: Literal["sphere", "slab", "clustered"] = "sphere"
+    radius_um: float = 50.0
+    slab_thickness_um: float = 20.0
+    field_decay_length_um: float = 15.0
+    seed: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if self.radius_um <= 0:
+            raise ValueError(f"radius_um must be positive, got {self.radius_um}")
+        if self.slab_thickness_um <= 0:
+            raise ValueError(
+                f"slab_thickness_um must be positive, got {self.slab_thickness_um}"
+            )
+        if self.field_decay_length_um <= 0:
+            raise ValueError(
+                f"field_decay_length_um must be positive, got {self.field_decay_length_um}"
+            )
 
 
 # Physical constants (module-level for convenience)

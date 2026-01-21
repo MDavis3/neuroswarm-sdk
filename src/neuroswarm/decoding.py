@@ -41,6 +41,11 @@ class DecodingParams:
         spike_threshold: Spike detection threshold (std deviations)
         spike_refractory_ms: Minimum inter-spike interval (ms)
         target_resolution_ms: Target temporal resolution (ms)
+        use_matched_filter: Enable matched filter spike detection
+        matched_filter_window_ms: Spike template window length (ms)
+        use_wiener: Enable Wiener deconvolution
+        wiener_noise_floor: Noise floor added to PSD (stabilization)
+        wiener_highfreq_hz: High-frequency band for noise PSD estimation (Hz)
     """
     highpass_freq: float = 1.0          # Hz
     lowpass_freq: float = 200.0         # Hz
@@ -53,6 +58,11 @@ class DecodingParams:
     spike_threshold: float = 3.0        # std
     spike_refractory_ms: float = 2.0    # ms
     target_resolution_ms: float = 1.0   # ms
+    use_matched_filter: bool = False
+    matched_filter_window_ms: float = 6.0
+    use_wiener: bool = False
+    wiener_noise_floor: float = 1e-6
+    wiener_highfreq_hz: float = 300.0
 
     def __post_init__(self) -> None:
         """Validate parameters."""
@@ -82,6 +92,18 @@ class DecodingParams:
             raise ValueError(
                 f"spike_threshold must be positive, got {self.spike_threshold}"
             )
+        if self.matched_filter_window_ms <= 0:
+            raise ValueError(
+                f"matched_filter_window_ms must be positive, got {self.matched_filter_window_ms}"
+            )
+        if self.wiener_noise_floor <= 0:
+            raise ValueError(
+                f"wiener_noise_floor must be positive, got {self.wiener_noise_floor}"
+            )
+        if self.wiener_highfreq_hz <= 0:
+            raise ValueError(
+                f"wiener_highfreq_hz must be positive, got {self.wiener_highfreq_hz}"
+            )
 
 
 @dataclass
@@ -107,6 +129,99 @@ class BatchMetrics:
     artifact_fraction: float = 0.0
     pca_components_used: int = 0
     processing_time_ms: float = 0.0
+
+
+class MatchedFilterDetector:
+    """
+    Matched filter detector for spike waveforms.
+
+    Uses a spike template to improve detection under heavy noise.
+    """
+
+    def __init__(self) -> None:
+        self._template_cache: Dict[float, NDArray[np.float64]] = {}
+
+    def _generate_template(self, dt_ms: float, window_ms: float) -> NDArray[np.float64]:
+        """Generate spike template using Izhikevich neuron dynamics."""
+        from .physics import IzhikevichNeuron
+
+        neuron = IzhikevichNeuron()
+        n_steps = int(50.0 / dt_ms)
+        I_input = np.zeros(n_steps)
+        I_input[int(10.0 / dt_ms):int(20.0 / dt_ms)] = 10.0
+        v_trace, spikes = neuron.simulate(I_input, dt_ms)
+
+        spike_indices = np.where(spikes)[0]
+        if len(spike_indices) == 0:
+            # Fallback: use a simple Gaussian pulse
+            t = np.linspace(-1, 1, int(window_ms / dt_ms))
+            template = np.exp(-0.5 * (t / 0.2) ** 2)
+        else:
+            center = spike_indices[0]
+            half_window = int((window_ms / dt_ms) / 2)
+            start = max(0, center - half_window)
+            end = min(len(v_trace), center + half_window)
+            template = v_trace[start:end]
+
+        # Normalize template
+        template = template - np.mean(template)
+        norm = np.linalg.norm(template) + 1e-12
+        return template / norm
+
+    def apply(
+        self,
+        signal: NDArray[np.float64],
+        dt_ms: float,
+        window_ms: float = 6.0
+    ) -> NDArray[np.float64]:
+        """Apply matched filter and return correlation output."""
+        key = round(window_ms / dt_ms, 4)
+        if key not in self._template_cache:
+            self._template_cache[key] = self._generate_template(dt_ms, window_ms)
+
+        template = self._template_cache[key]
+        # Matched filter: correlate with reversed template
+        output = np.convolve(signal, template[::-1], mode="same")
+        return output
+
+
+class WienerFilter:
+    """
+    Wiener deconvolution for noise-optimal linear filtering.
+    """
+
+    def apply(
+        self,
+        signal: NDArray[np.float64],
+        sampling_rate_hz: float,
+        noise_floor: float = 1e-6,
+        highfreq_hz: float = 300.0
+    ) -> NDArray[np.float64]:
+        """
+        Apply Wiener filter in frequency domain.
+
+        Args:
+            signal: Input signal
+            sampling_rate_hz: Sampling rate in Hz
+            noise_floor: Stabilization noise floor
+            highfreq_hz: High frequency band for noise PSD estimation
+        """
+        n = len(signal)
+        freqs = np.fft.rfftfreq(n, d=1.0 / sampling_rate_hz)
+        signal_fft = np.fft.rfft(signal)
+        psd_signal = np.abs(signal_fft) ** 2
+
+        # Estimate noise PSD from high-frequency band
+        hf_mask = freqs >= highfreq_hz
+        if np.any(hf_mask):
+            noise_psd = np.mean(psd_signal[hf_mask])
+        else:
+            noise_psd = np.mean(psd_signal[-10:])
+
+        # Wiener filter H = S / (S + N)
+        H = psd_signal / (psd_signal + noise_psd + noise_floor)
+        filtered_fft = signal_fft * H
+        return np.fft.irfft(filtered_fft, n=n)
 
 
 class SignalExtractor:
@@ -135,6 +250,8 @@ class SignalExtractor:
         self._batch_history: List[BatchMetrics] = []
         self._pca: Optional[PCA] = None
         self._ica: Optional[FastICA] = None
+        self._matched_filter = MatchedFilterDetector()
+        self._wiener_filter = WienerFilter()
 
         logger.info(
             f"SignalExtractor initialized: "
@@ -539,8 +656,25 @@ class SignalExtractor:
         # Preprocess
         preprocessed, artifact_mask = self.preprocess(signal, sampling_rate_hz)
 
-        # Detect spikes
-        spike_indices, spike_amplitudes = self.detect_spikes(preprocessed, dt_ms)
+        # Optional Wiener deconvolution
+        if self.params.use_wiener:
+            preprocessed = self._wiener_filter.apply(
+                preprocessed,
+                sampling_rate_hz,
+                noise_floor=self.params.wiener_noise_floor,
+                highfreq_hz=self.params.wiener_highfreq_hz
+            )
+
+        # Detect spikes (matched filter optional)
+        if self.params.use_matched_filter:
+            mf_output = self._matched_filter.apply(
+                preprocessed,
+                dt_ms,
+                window_ms=self.params.matched_filter_window_ms
+            )
+            spike_indices, spike_amplitudes = self.detect_spikes(mf_output, dt_ms)
+        else:
+            spike_indices, spike_amplitudes = self.detect_spikes(preprocessed, dt_ms)
 
         # Reconstruct spike train
         spike_train = self.reconstruct_spike_train(

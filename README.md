@@ -23,6 +23,13 @@ Neuro-SWARM³ (Neurophotonic Solution-dispersible Wireless Activity Reporter for
    - Low-frequency drift simulation
    - Burst artifact generation
 
+4. **Robustness Enhancements**
+   - Matched filter spike detection for heavy noise
+   - Wiener deconvolution for noise-optimal recovery
+   - Wavelength sweep for NIR-II optimization
+   - Spatial particle distribution modeling
+   - Stress-test reporting outputs
+
 ## Technical Specifications
 
 ### Nanoparticle Geometry
@@ -78,6 +85,22 @@ extraction = extractor.extract(noisy_signal, dt_ms=0.1)
 
 print(f"Detected {len(extraction.spike_times_ms)} spikes")
 print(f"SSNR: {extraction.ssnr:.1f}")
+```
+
+## Robustness Enhancements
+
+Example using Wiener + matched filter for heavy noise:
+
+```python
+from neuroswarm.decoding import SignalExtractor, DecodingParams
+
+params = DecodingParams(
+    use_wiener=True,
+    use_matched_filter=True,
+    matched_filter_window_ms=6.0,
+)
+extractor = SignalExtractor(params)
+result = extractor.process_batch(noisy_signal, dt_ms=0.1)
 ```
 
 ## Project Structure
