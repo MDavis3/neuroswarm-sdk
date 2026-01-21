@@ -200,9 +200,9 @@ with tab1:
             color='white', transform=ax.transAxes
         )
         
-        # Separator line
-        ax.axhline(y=0.5, xmin=0.52, xmax=0.58, color='#FF6B6B', 
-                   linestyle='--', linewidth=2, transform=ax.transAxes)
+        # Separator line (use plot instead of axhline for transform support)
+        ax.plot([0.52, 0.58], [0.5, 0.5], color='#FF6B6B', 
+                linestyle='--', linewidth=2, transform=ax.transAxes)
         ax.text(0.55, 0.75, "Forward Model", ha='center', fontsize=10, 
                 color='#4ECDC4', transform=ax.transAxes)
         ax.text(0.85, 0.75, "Inverse Model", ha='center', fontsize=10, 
