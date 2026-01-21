@@ -29,35 +29,51 @@ class DecodingParams:
     """
     Configuration for signal decoding.
 
+    Default values are chosen based on neurophysiology and signal processing
+    best practices for extracellular spike detection.
+
     Attributes:
-        highpass_freq: High-pass filter cutoff (Hz)
-        lowpass_freq: Low-pass filter cutoff (Hz)
-        filter_order: Butterworth filter order
-        detrend_method: Detrending method ("linear", "constant", "none")
-        artifact_threshold: Threshold for artifact detection (std deviations)
-        artifact_interpolate: Interpolate over detected artifacts
-        pca_variance_threshold: Cumulative variance for PCA component selection
-        ica_n_components: Number of ICA components (None for auto)
-        spike_threshold: Spike detection threshold (std deviations)
-        spike_refractory_ms: Minimum inter-spike interval (ms)
-        target_resolution_ms: Target temporal resolution (ms)
-        use_matched_filter: Enable matched filter spike detection
-        matched_filter_window_ms: Spike template window length (ms)
-        use_wiener: Enable Wiener deconvolution
-        wiener_noise_floor: Noise floor added to PSD (stabilization)
-        wiener_highfreq_hz: High-frequency band for noise PSD estimation (Hz)
+        highpass_freq: High-pass filter cutoff (Hz). Default 1 Hz removes DC drift
+            while preserving spike waveforms (typical spike duration ~1-2 ms).
+        lowpass_freq: Low-pass filter cutoff (Hz). Default 200 Hz captures spike
+            frequency content while rejecting high-frequency detector noise.
+        filter_order: Butterworth filter order. Default 4 gives 24 dB/octave rolloff
+            with minimal phase distortion and no passband ripple.
+        detrend_method: Detrending method ("linear", "constant", "none").
+        artifact_threshold: Threshold for artifact detection (std deviations).
+            Default 5σ gives P(false positive) ≈ 5.7×10⁻⁷ for Gaussian noise.
+        artifact_interpolate: Interpolate over detected artifacts.
+        pca_variance_threshold: Cumulative variance for PCA component selection.
+            Default 0.95 retains components explaining 95% of variance.
+        ica_n_components: Number of ICA components (None for auto).
+        spike_threshold: Spike detection threshold (std deviations). Default 3σ
+            gives ~0.13% false positive rate, suitable for typical SNR conditions.
+        spike_refractory_ms: Minimum inter-spike interval (ms). Default 2 ms matches
+            the absolute refractory period of neurons (Hodgkin & Huxley, 1952).
+        target_resolution_ms: Target temporal resolution (ms). Default 1 ms matches
+            the integration time in Hardy et al. (2021).
+        use_matched_filter: Enable matched filter spike detection.
+        matched_filter_window_ms: Spike template window length (ms).
+        use_wiener: Enable Wiener deconvolution for noise-optimal filtering.
+        wiener_noise_floor: Noise floor added to PSD for numerical stability.
+        wiener_highfreq_hz: High-frequency band for noise PSD estimation (Hz).
     """
-    highpass_freq: float = 1.0          # Hz
-    lowpass_freq: float = 200.0         # Hz
-    filter_order: int = 4
+    # Filter parameters
+    highpass_freq: float = 1.0          # Hz - removes slow drift
+    lowpass_freq: float = 200.0         # Hz - rejects HF noise
+    filter_order: int = 4               # 24 dB/octave, minimal ringing
     detrend_method: str = "linear"
-    artifact_threshold: float = 5.0     # std
+    # Artifact detection
+    artifact_threshold: float = 5.0     # std - very conservative
     artifact_interpolate: bool = True
+    # Dimensionality reduction
     pca_variance_threshold: float = 0.95
     ica_n_components: Optional[int] = None
-    spike_threshold: float = 3.0        # std
-    spike_refractory_ms: float = 2.0    # ms
-    target_resolution_ms: float = 1.0   # ms
+    # Spike detection
+    spike_threshold: float = 3.0        # std - ~0.13% FP rate
+    spike_refractory_ms: float = 2.0    # ms - absolute refractory period
+    target_resolution_ms: float = 1.0   # ms - per Hardy et al. (2021)
+    # Advanced options
     use_matched_filter: bool = False
     matched_filter_window_ms: float = 6.0
     use_wiener: bool = False
@@ -288,6 +304,11 @@ class SignalExtractor:
         p = self.params
 
         # 1. Bandpass filter
+        # Why Butterworth: Maximally flat passband (no ripple), good for preserving
+        # spike waveform morphology. 4th order provides sharp cutoff (~24 dB/octave)
+        # without excessive ringing that could distort spike detection.
+        # Why 1-200 Hz: Captures action potential frequency content while rejecting
+        # DC drift and high-frequency detector noise.
         nyquist = sampling_rate_hz / 2
         low = max(p.highpass_freq / nyquist, 0.001)
         high = min(p.lowpass_freq / nyquist, 0.999)
@@ -297,8 +318,9 @@ class SignalExtractor:
                 p.filter_order,
                 [low, high],
                 btype="bandpass",
-                output="sos"
+                output="sos"  # Second-order sections for numerical stability
             )
+            # sosfiltfilt: Zero-phase filtering (forward-backward) preserves spike timing
             filtered = sp_signal.sosfiltfilt(sos, signal)
         else:
             logger.warning("Invalid filter frequencies, skipping filtering")
@@ -332,11 +354,20 @@ class SignalExtractor:
         Returns:
             Boolean mask (True = artifact)
         """
-        # Robust statistics using median absolute deviation
+        # Robust statistics using Median Absolute Deviation (MAD)
+        # Why MAD instead of std: Standard deviation is heavily influenced by outliers
+        # (the very artifacts we're trying to detect). MAD is robust to up to 50%
+        # contamination, making it ideal for artifact detection in neural signals.
+        # Reference: Rousseeuw & Croux (1993), J. American Statistical Association
         median = np.median(signal)
         mad = np.median(np.abs(signal - median))
-        std_estimate = 1.4826 * mad  # MAD to std conversion
+        # 1.4826 is the consistency constant for Gaussian distributions:
+        # For N(0,1), MAD ≈ 0.6745, so std ≈ 1.4826 * MAD
+        std_estimate = 1.4826 * mad
 
+        # Why 5σ threshold: Balances sensitivity vs false positives.
+        # For Gaussian noise: P(|X| > 5σ) ≈ 5.7×10⁻⁷ (extremely rare)
+        # Real artifacts (motion, EMG) are typically 10-100× larger than neural signals.
         threshold = self.params.artifact_threshold * std_estimate
         artifact_mask = np.abs(signal - median) > threshold
 
@@ -493,18 +524,27 @@ class SignalExtractor:
         """
         p = self.params
 
-        # Compute threshold
+        # Compute threshold using standard deviation
+        # Why 3σ threshold (default): For Gaussian noise, P(X > 3σ) ≈ 0.13%
+        # This gives ~1.3 false positives per 1000 samples, acceptable for most
+        # neural recording scenarios. Increase to 4-5σ for higher specificity.
         std = np.std(signal)
         threshold = p.spike_threshold * std
 
         # Find threshold crossings (positive peaks)
+        # We detect positive-going spikes; extracellular action potentials typically
+        # appear as positive deflections in the differential photon signal.
         above_threshold = signal > threshold
 
-        # Find rising edges
+        # Find rising edges (0→1 transitions in thresholded signal)
         crossings = np.diff(above_threshold.astype(int))
         spike_starts = np.where(crossings == 1)[0]
 
-        # Refine to peak locations
+        # Apply refractory period constraint
+        # Why 2 ms: Matches the absolute refractory period of neurons.
+        # During this period, voltage-gated Na+ channels are inactivated and
+        # the neuron cannot fire again regardless of stimulus strength.
+        # Reference: Hodgkin & Huxley (1952), J. Physiology
         refractory_samples = int(p.spike_refractory_ms / dt_ms)
         spike_indices = []
         spike_amplitudes = []
@@ -577,17 +617,32 @@ class SignalExtractor:
         baseline_photons: float = 1e5
     ) -> float:
         """
-        Compute signal-to-shot-noise ratio.
+        Compute signal-to-shot-noise ratio (SSNR).
 
-        SSNR = (ΔS/S₀) * sqrt(N_ph)
+        The SSNR is the fundamental detection limit for optical measurements,
+        arising from the discrete nature of photon counting (Poisson statistics).
+
+        Formula:
+            SSNR = (ΔS / S₀) × √N_ph
+
+        Where:
+            ΔS = peak differential signal (photon counts at spike)
+            S₀ = baseline signal level (photon counts)
+            N_ph = total photon count (determines shot noise σ = √N_ph)
+
+        Target: SSNR ~ 10³ per Hardy et al. (2021), achieved with:
+            - 10³ nanoparticle probes
+            - 10 mW/mm² illumination at 1050 nm
+            - 1 ms integration time
 
         Args:
-            signal: Processed signal
+            signal: Processed signal (differential photon counts)
             spike_indices: Detected spike locations
-            baseline_photons: Baseline photon count
+            baseline_photons: Baseline photon count for shot noise calculation
 
         Returns:
-            SSNR value
+            SSNR value (dimensionless). Higher is better; >100 typically required
+            for reliable single-spike detection.
         """
         if len(spike_indices) == 0:
             return 0.0

@@ -436,15 +436,38 @@ class NeuroSwarmPhysics:
         delta_Q_sca: NDArray[np.float64]
     ) -> NDArray[np.float64]:
         """
-        Calculate differential photon count using Equation (1).
+        Calculate differential photon count using Equation (1) from Hardy et al. (2021).
 
-        ΔN_ph = I_inc * (ΔQ_sca * π * r²) * (λ / hc) * η * T * t_int
+        This is the core equation linking the change in scattering efficiency
+        (due to electric field modulation of PEDOT:PSS) to the measurable
+        photon count signal.
+
+        Formula:
+            ΔN_ph = I_inc × (ΔQ_sca × π × r²) × (λ / hc) × η × T × t_int
+
+        Where:
+            I_inc = Incident light intensity (default: 10 mW/mm²)
+            ΔQ_sca = Change in scattering efficiency (from Drude-Lorentz model)
+            r = Nanoparticle radius (~83 nm for 63nm core + 5nm shell + 15nm coating)
+            λ = Probing wavelength (default: 1050 nm, NIR-II window)
+            h = Planck's constant (6.626×10⁻³⁴ J·s)
+            c = Speed of light (3×10⁸ m/s)
+            η = Solid angle fraction (default: 0.32 for NA=0.9 objective)
+            T = Detection efficiency / quantum yield (default: 0.5)
+            t_int = Integration time (default: 1 ms)
+
+        Expected output:
+            Single probe: ~120k photon differential at 12 mV/nm field
+            With 10³ probes: ~10⁵ photon differential, SSNR ~ 10³
+
+        Reference:
+            Hardy et al., IEEE Photonics Technology Letters, 33(16), 2021.
 
         Args:
-            delta_Q_sca: Change in scattering efficiency
+            delta_Q_sca: Change in scattering efficiency (dimensionless array)
 
         Returns:
-            Differential photon count array
+            Differential photon count array (photons per integration time)
         """
         opt = self.config.optical
         geo = self.config.geometry
