@@ -31,6 +31,15 @@ from .physics import NeuroSwarmPhysics
 from .noise import AdversarialNoiseGenerator
 from .decoding import SignalExtractor
 from .reporting import summarize_detection, noise_sweep_report, wavelength_sweep_report
+from .visualization import (
+    generate_presentation_data,
+    plot_adversarial_environment,
+    plot_decoding_extraction,
+    plot_performance_summary,
+    generate_all_figures,
+    validate_simulation_honesty,
+    VisualizationData,
+)
 
 __all__ = [
     # Types
@@ -49,4 +58,12 @@ __all__ = [
     "summarize_detection",
     "noise_sweep_report",
     "wavelength_sweep_report",
+    # Visualization
+    "generate_presentation_data",
+    "plot_adversarial_environment",
+    "plot_decoding_extraction",
+    "plot_performance_summary",
+    "generate_all_figures",
+    "validate_simulation_honesty",
+    "VisualizationData",
 ]

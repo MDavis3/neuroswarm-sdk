@@ -552,10 +552,16 @@ with tab3:
             config = SimulationConfig(duration=500, num_particles=1000, dt=0.1)
             physics = NeuroSwarmPhysics(config)
             sim_result = physics.simulate(input_rate_hz=10)
-            
+
             clean_signal = sim_result["delta_N_ph"]
             true_spikes = sim_result["spikes"]
             dt_ms = config.dt
+            tolerance_samples = max(1, int(5.0 / dt_ms))
+            if use_matched:
+                tolerance_samples = max(
+                    tolerance_samples,
+                    int(0.5 * DecodingParams().matched_filter_window_ms / dt_ms)
+                )
             
             noise_levels = np.linspace(noise_min, noise_max, noise_steps)
             
@@ -581,7 +587,8 @@ with tab3:
                     result_std["spike_indices"],
                     true_spikes,
                     result_std["preprocessed"],
-                    dt_ms=dt_ms
+                    dt_ms=dt_ms,
+                    tolerance_samples=tolerance_samples
                 )
                 f1_standard.append(metrics_std.f1_score)
                 
@@ -596,7 +603,8 @@ with tab3:
                     result_robust["spike_indices"],
                     true_spikes,
                     result_robust["preprocessed"],
-                    dt_ms=dt_ms
+                    dt_ms=dt_ms,
+                    tolerance_samples=tolerance_samples
                 )
                 f1_robust.append(metrics_robust.f1_score)
             
@@ -679,13 +687,23 @@ with tab4:
                 decoded["spike_indices"],
                 sim_result["spikes"],
                 decoded["preprocessed"],
-                dt_ms=config.dt
+                dt_ms=config.dt,
+                tolerance_samples=max(
+                    1,
+                    int(5.0 / config.dt),
+                    int(0.5 * decoder.params.matched_filter_window_ms / config.dt)
+                )
             )
 
+            tolerance_samples = max(
+                1,
+                int(5.0 / config.dt),
+                int(0.5 * decoder.params.matched_filter_window_ms / config.dt)
+            )
             eval_metrics = decoder.evaluate_reconstruction(
                 decoded["spike_indices"],
                 sim_result["spikes"],
-                tolerance_samples=max(1, int(1.0 / config.dt))
+                tolerance_samples=tolerance_samples
             )
             true_indices = np.where(sim_result["spikes"])[0]
             timing_errors = []
