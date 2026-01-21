@@ -107,17 +107,24 @@ result = extractor.process_batch(noisy_signal, dt_ms=0.1)
 
 ```
 neuroswarm-sdk/
+├── app.py                  # Streamlit interactive dashboard
 ├── src/
 │   └── neuroswarm/
 │       ├── __init__.py
 │       ├── types.py        # Type-safe dataclasses (geometry, Drude-Lorentz params)
 │       ├── physics.py      # Forward model (Izhikevich + Drude-Lorentz + Eq. 1)
 │       ├── decoding.py     # Inverse model (SignalExtractor with PCA/ICA)
-│       └── noise.py        # Adversarial noise generators
+│       ├── noise.py        # Adversarial noise generators
+│       └── reporting.py    # Stress-test reporting utilities
+├── scripts/
+│   └── generate_visuals.py # Generate presentation plots
+├── assets/
+│   └── visuals/            # Pre-generated presentation plots
 ├── tests/
 │   ├── test_physics.py     # Equation (1) validation
 │   ├── test_decoding.py    # Spike recovery under noise
-│   └── test_noise.py       # Noise injection statistics
+│   ├── test_noise.py       # Noise injection statistics
+│   └── test_reporting.py   # Reporting utilities tests
 ├── requirements.txt
 └── README.md
 ```
@@ -175,6 +182,32 @@ Target: SSNR ~ 10³ with 10³ probes at 10 mW/mm² illumination.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Interactive Dashboard
+
+Launch the Streamlit-based visualization dashboard:
+
+```bash
+streamlit run app.py
+```
+
+Features:
+- 📊 **Pipeline Overview**: Visual diagram of the forward/inverse model pipeline
+- 🌈 **Wavelength Sweep**: Optimize detection wavelength in the NIR-II window
+- 📉 **Noise Robustness**: Test decoder performance across noise levels
+- 🔬 **Live Simulation**: Run end-to-end simulations with configurable parameters
+
+## Presentation Visuals
+
+Pre-generated plots are available in `assets/visuals/`:
+- `pipeline_diagram.png` — End-to-end signal processing pipeline
+- `wavelength_sweep.png` — Optimal wavelength in NIR-II range
+- `noise_robustness.png` — Decoder F1 vs noise level
+
+Regenerate with:
+```bash
+PYTHONPATH=src python scripts/generate_visuals.py
+```
+
 ## Testing
 
 ```bash
@@ -192,6 +225,8 @@ Tests validate:
 - `numpy>=1.24.0` — Array operations, Drude-Lorentz math
 - `scipy>=1.10.0` — Signal filtering, numerical methods
 - `scikit-learn>=1.3.0` — PCA/ICA decomposition
+- `matplotlib>=3.7.0` — Visualization and plotting
+- `streamlit>=1.28.0` — Interactive dashboard
 - `pytest>=7.4.0` — Testing framework
 
 ## References
