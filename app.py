@@ -1,7 +1,7 @@
 """
-Neuro-SWARM³ SDK Interactive Dashboard
+Neuro-SWARM3 SDK Interactive Dashboard
 
-A Streamlit-based visualization for the Neuro-SWARM³ nanoparticle
+A Streamlit-based visualization for the Neuro-SWARM3 nanoparticle
 neural recording system.
 
 Run with: streamlit run app.py
@@ -30,7 +30,7 @@ from neuroswarm.reporting import summarize_detection
 
 # Page config
 st.set_page_config(
-    page_title="Neuro-SWARM³ SDK",
+    page_title="Neuro-SWARM3 SDK",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -39,45 +39,269 @@ st.set_page_config(
 # Custom CSS for styling
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1E3A5F;
-        text-align: center;
-        margin-bottom: 0.5rem;
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+    :root {
+        --bg-0: #0b1020;
+        --bg-1: #111c33;
+        --panel: rgba(15, 22, 38, 0.92);
+        --panel-2: rgba(18, 28, 48, 0.92);
+        --panel-border: rgba(148, 163, 184, 0.18);
+        --ink: #e6edf9;
+        --muted: #9fb0c7;
+        --accent: #2ec4b6;
+        --accent-2: #f6c453;
+        --accent-3: #ff6b6b;
+        --accent-4: #8bd3ff;
+        --glow: rgba(46, 196, 182, 0.35);
     }
-    .sub-header {
+
+    html, body, [class*="css"] {
+        font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+        color: var(--ink);
+    }
+
+    h1, h2, h3, h4 {
+        font-family: 'Fraunces', 'Space Grotesk', serif;
+        letter-spacing: -0.02em;
+    }
+
+    .stApp {
+        background: linear-gradient(160deg, var(--bg-0) 0%, #0e1629 35%, var(--bg-1) 100%);
+    }
+
+    .stApp::before {
+        content: "";
+        position: fixed;
+        inset: -20vh;
+        background:
+            radial-gradient(35% 40% at 12% 10%, rgba(139, 211, 255, 0.25), transparent 60%),
+            radial-gradient(35% 40% at 85% 12%, rgba(246, 196, 83, 0.2), transparent 60%),
+            radial-gradient(40% 50% at 70% 85%, rgba(46, 196, 182, 0.18), transparent 60%);
+        z-index: 0;
+        pointer-events: none;
+    }
+
+    div[data-testid="stAppViewContainer"] {
+        background: transparent;
+    }
+
+    section.main > div {
+        position: relative;
+        z-index: 1;
+    }
+
+    section[data-testid="stSidebar"] > div {
+        background: linear-gradient(180deg, #0f1b31 0%, #0b1426 100%);
+        border-right: 1px solid var(--panel-border);
+    }
+
+    section[data-testid="stSidebar"] h2 {
+        color: var(--ink);
         font-size: 1.1rem;
-        color: #5A6C7D;
-        text-align: center;
-        margin-bottom: 2rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
+
+    .hero {
+        background: radial-gradient(120% 120% at 10% 0%, rgba(46, 196, 182, 0.2), transparent 55%),
+                    radial-gradient(100% 100% at 90% 10%, rgba(246, 196, 83, 0.22), transparent 60%),
+                    var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 24px;
+        padding: 2.2rem 2.4rem;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+        animation: fadeUp 0.8s ease both;
     }
+
+    .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        background: rgba(46, 196, 182, 0.18);
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 0.8rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    .hero h1 {
+        margin: 0.8rem 0 0.6rem;
+        font-size: 2.6rem;
+        line-height: 1.05;
+    }
+
+    .hero p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+        max-width: 54rem;
+    }
+
+    .hero-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1rem;
+        margin-top: 1.6rem;
+    }
+
+    .hero-card {
+        background: var(--panel-2);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        padding: 1rem 1.2rem;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .hero-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .hero-card strong {
+        display: block;
+        font-size: 1.4rem;
+        margin-top: 0.35rem;
+    }
+
+    div[data-testid="stMetric"] {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        padding: 1rem 1.2rem;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    div[data-testid="stMetric"] label {
+        color: var(--muted) !important;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .ns-card {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        padding: 1.2rem 1.4rem;
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.25);
+    }
+
+    .ns-card h4 {
+        margin: 0 0 0.75rem;
+        font-size: 1.1rem;
+    }
+
+    .ns-list {
+        margin: 0;
+        padding-left: 1.1rem;
+        color: var(--muted);
+    }
+
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+        gap: 0.5rem;
+        background: rgba(15, 22, 38, 0.55);
+        padding: 0.4rem;
+        border-radius: 999px;
+        border: 1px solid var(--panel-border);
     }
+
     .stTabs [data-baseweb="tab"] {
-        background-color: #f0f2f6;
-        border-radius: 4px;
-        padding: 8px 16px;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--muted);
+        padding: 0.45rem 1.1rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(120deg, rgba(46, 196, 182, 0.18), rgba(139, 211, 255, 0.2));
+        color: var(--ink);
+        border: 1px solid rgba(46, 196, 182, 0.5);
+        box-shadow: 0 0 16px rgba(46, 196, 182, 0.25);
+    }
+
+    .stButton > button {
+        background: linear-gradient(120deg, var(--accent), #3a86ff);
+        color: #0b1020;
+        border: none;
+        border-radius: 999px;
+        padding: 0.55rem 1.3rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        box-shadow: 0 10px 20px rgba(46, 196, 182, 0.35);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-1px) scale(1.01);
+        box-shadow: 0 14px 26px rgba(46, 196, 182, 0.4);
+    }
+
+    .stButton > button:active {
+        transform: translateY(0);
+        box-shadow: 0 8px 16px rgba(46, 196, 182, 0.3);
+    }
+
+    .stAlert {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+    }
+
+    .stCaption {
+        color: var(--muted) !important;
+    }
+
+    @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown('<p class="main-header">🧠 Neuro-SWARM³ SDK</p>', unsafe_allow_html=True)
 st.markdown(
-    '<p class="sub-header">System-on-a-Nanoparticle for Wireless Neural Recording</p>',
+    """
+    <section class="hero">
+        <div class="hero-badge">Neuro-SWARM3 SDK</div>
+        <h1>Wireless Neural Activity Readout in the NIR-II Window</h1>
+        <p>
+            Simulate electro-plasmonic nanoparticle probes, stress-test the decoding
+            pipeline, and explore wavelength optimization for far-field neural detection.
+        </p>
+        <div class="hero-grid">
+            <div class="hero-card">
+                <span>Optical Window</span>
+                <strong>1000-1700 nm</strong>
+            </div>
+            <div class="hero-card">
+                <span>Probe Diameter</span>
+                <strong>&lt; 200 nm</strong>
+            </div>
+            <div class="hero-card">
+                <span>Target SSNR</span>
+                <strong>~ 10^3</strong>
+            </div>
+            <div class="hero-card">
+                <span>Model Stack</span>
+                <strong>Izhikevich + Mie</strong>
+            </div>
+        </div>
+    </section>
+    """,
     unsafe_allow_html=True
 )
 
 # Sidebar configuration
-st.sidebar.header("⚙️ Simulation Parameters")
+st.sidebar.header("Simulation Controls")
+st.sidebar.caption("Tweak the in silico experiment and noise conditions.")
 
 # Simulation duration
 duration_ms = st.sidebar.slider(
@@ -108,7 +332,7 @@ input_rate = st.sidebar.slider(
 # Noise parameters
 st.sidebar.subheader("Noise Settings")
 thermal_noise = st.sidebar.slider(
-    "Thermal Noise (σ)",
+    "Thermal Noise (sigma)",
     min_value=0,
     max_value=500,
     value=100
@@ -122,10 +346,10 @@ drift_amplitude = st.sidebar.slider(
 
 # Main tabs
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Pipeline Overview",
-    "🌈 Wavelength Sweep",
-    "📉 Noise Robustness",
-    "🔬 Live Simulation"
+    "Pipeline Overview",
+    "Wavelength Sweep",
+    "Noise Robustness",
+    "Live Simulation"
 ])
 
 # ============================================================================
@@ -138,17 +362,17 @@ with tab1:
     
     with col1:
         # Create pipeline diagram
-        fig, ax = plt.subplots(figsize=(12, 6), facecolor='#0e1117')
-        ax.set_facecolor('#0e1117')
+        fig, ax = plt.subplots(figsize=(12, 6), facecolor='#0b1020')
+        ax.set_facecolor('#0b1020')
         
         # Pipeline stages
         stages = [
-            ("Izhikevich\nNeuron", "#4ECDC4", "Membrane\nPotential"),
-            ("Drude-Lorentz\nDielectric", "#45B7D1", "ε(ω, E)"),
-            ("Mie\nScattering", "#96CEB4", "ΔQ_sca"),
-            ("Equation (1)\nPhoton Count", "#FFEAA7", "ΔN_ph"),
-            ("Noise\nCorruption", "#DDA0DD", "Noisy Signal"),
-            ("Signal\nExtractor", "#FF6B6B", "Decoded\nSpikes"),
+            ("Izhikevich\nNeuron", "#2ec4b6", "Membrane\nPotential"),
+            ("Drude-Lorentz\nDielectric", "#8bd3ff", "epsilon(w, E)"),
+            ("Mie\nScattering", "#a7d49b", "Delta Q_sca"),
+            ("Equation (1)\nPhoton Count", "#f6c453", "Delta N_ph"),
+            ("Noise\nCorruption", "#f49db3", "Noisy Signal"),
+            ("Signal\nExtractor", "#ff6b6b", "Decoded\nSpikes"),
         ]
         
         box_width = 0.12
@@ -172,7 +396,7 @@ with tab1:
             ax.text(
                 x + box_width/2, y_center,
                 name, ha='center', va='center',
-                fontsize=9, fontweight='bold', color='#1a1a2e',
+                fontsize=9, fontweight='bold', color='#0b1020',
                 transform=ax.transAxes, zorder=3
             )
             
@@ -195,7 +419,7 @@ with tab1:
         
         # Title
         ax.text(
-            0.5, 0.92, "Neuro-SWARM³ Forward Model → Inverse Model Pipeline",
+            0.5, 0.92, "Neuro-SWARM3 Forward Model -> Inverse Model Pipeline",
             ha='center', va='top', fontsize=14, fontweight='bold',
             color='white', transform=ax.transAxes
         )
@@ -203,10 +427,10 @@ with tab1:
         # Separator line (use plot instead of axhline for transform support)
         ax.plot([0.52, 0.58], [0.5, 0.5], color='#FF6B6B', 
                 linestyle='--', linewidth=2, transform=ax.transAxes)
-        ax.text(0.55, 0.75, "Forward Model", ha='center', fontsize=10, 
-                color='#4ECDC4', transform=ax.transAxes)
-        ax.text(0.85, 0.75, "Inverse Model", ha='center', fontsize=10, 
-                color='#FF6B6B', transform=ax.transAxes)
+        ax.text(0.55, 0.75, "Forward Model", ha='center', fontsize=10,
+                color='#2ec4b6', transform=ax.transAxes)
+        ax.text(0.85, 0.75, "Inverse Model", ha='center', fontsize=10,
+                color='#ff6b6b', transform=ax.transAxes)
         
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
@@ -217,25 +441,31 @@ with tab1:
     
     with col2:
         st.subheader("Key Specifications")
-        
-        st.metric("Particle Size", "~150 nm", "Core-Shell Structure")
-        st.metric("Wavelength", "1050 nm", "NIR-II Window")
-        st.metric("Target SSNR", "~10³", "Shot-Noise Limited")
+
+        st.metric("Particle Size", "~150 nm", "Core-shell structure")
+        st.metric("Wavelength", "1050 nm", "NIR-II window")
+        st.metric("Target SSNR", "~10^3", "Shot-noise limited")
         st.metric("Resolution", "1 ms", "Temporal")
-        
-        st.markdown("---")
-        st.markdown("""
-        **Nanoparticle Structure:**
-        - 🔵 SiOx Core: 63 nm radius
-        - 🟡 Au Shell: 5 nm thickness
-        - 🟣 PEDOT:PSS: 15 nm coating
-        """)
+
+        st.markdown(
+            """
+            <div class="ns-card">
+                <h4>Nanoparticle Structure</h4>
+                <ul class="ns-list">
+                    <li>SiOx core: 63 nm radius</li>
+                    <li>Au shell: 5 nm thickness</li>
+                    <li>PEDOT:PSS: 15 nm coating</li>
+                </ul>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 # ============================================================================
 # TAB 2: Wavelength Sweep
 # ============================================================================
 with tab2:
-    st.header("Wavelength Optimization in NIR-II Window")
+    st.header("Wavelength Optimization in the NIR-II Window")
     
     col1, col2 = st.columns([3, 1])
     
@@ -246,7 +476,7 @@ with tab2:
         step_wl = st.number_input("Step Size (nm)", value=25, min_value=5, max_value=50)
         e_field = st.number_input("Electric Field (mV/nm)", value=3.0, min_value=0.5, max_value=12.0)
     
-    if st.button("🔍 Run Wavelength Sweep", key="sweep_btn"):
+    if st.button("Run Wavelength Sweep", key="sweep_btn"):
         with st.spinner("Sweeping wavelengths..."):
             # Run sweep
             config = SimulationConfig(duration=100, num_particles=1000)
@@ -262,10 +492,10 @@ with tab2:
             sweep_result = physics.sweep_wavelengths(sweep_params)
             
             with col1:
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), facecolor='#0e1117')
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), facecolor='#0b1020')
                 
                 for ax in [ax1, ax2]:
-                    ax.set_facecolor('#1a1a2e')
+                    ax.set_facecolor('#121a2d')
                     ax.tick_params(colors='white')
                     for spine in ax.spines.values():
                         spine.set_color('white')
@@ -275,18 +505,18 @@ with tab2:
                 ssnr = sweep_result["ssnr"]
                 optimal_wl = sweep_result["optimal_wavelength_nm"]
                 
-                # Plot 1: ΔN_ph
-                ax1.plot(wavelengths, delta_n_ph, 'o-', color='#4ECDC4', linewidth=2, markersize=6)
+                # Plot 1: Delta N_ph
+                ax1.plot(wavelengths, delta_n_ph, 'o-', color='#2ec4b6', linewidth=2, markersize=6)
                 ax1.axvline(optimal_wl, color='#FF6B6B', linestyle='--', linewidth=2, label=f'Optimal: {optimal_wl:.0f} nm')
-                ax1.set_ylabel('ΔN_ph (photons)', color='white', fontsize=12)
+                ax1.set_ylabel('Delta N_ph (photons)', color='white', fontsize=12)
                 ax1.set_title('Differential Photon Count vs Wavelength', color='white', fontsize=14, fontweight='bold')
                 ax1.legend(facecolor='#1a1a2e', edgecolor='white', labelcolor='white')
                 ax1.grid(True, alpha=0.3, color='gray')
                 
                 # Plot 2: SSNR
-                ax2.plot(wavelengths, ssnr, 's-', color='#FFEAA7', linewidth=2, markersize=6)
+                ax2.plot(wavelengths, ssnr, 's-', color='#f6c453', linewidth=2, markersize=6)
                 ax2.axvline(optimal_wl, color='#FF6B6B', linestyle='--', linewidth=2)
-                ax2.axhline(1000, color='#96CEB4', linestyle=':', linewidth=2, label='Target SSNR = 10³')
+                ax2.axhline(1000, color='#a7d49b', linestyle=':', linewidth=2, label='Target SSNR = 10^3')
                 ax2.set_xlabel('Wavelength (nm)', color='white', fontsize=12)
                 ax2.set_ylabel('SSNR', color='white', fontsize=12)
                 ax2.set_title('Signal-to-Shot-Noise Ratio', color='white', fontsize=14, fontweight='bold')
@@ -298,7 +528,7 @@ with tab2:
                 plt.close()
             
             # Display optimal wavelength
-            st.success(f"✅ Optimal wavelength: **{optimal_wl:.0f} nm** with SSNR = {ssnr[np.argmax(ssnr)]:.2e}")
+            st.success(f"Optimal wavelength: **{optimal_wl:.0f} nm** with SSNR = {ssnr[np.argmax(ssnr)]:.2e}")
 
 # ============================================================================
 # TAB 3: Noise Robustness
@@ -310,13 +540,13 @@ with tab3:
     
     with col2:
         st.subheader("Test Parameters")
-        noise_min = st.number_input("Min Noise σ", value=50, min_value=0)
-        noise_max = st.number_input("Max Noise σ", value=500, min_value=100)
+        noise_min = st.number_input("Min Noise (sigma)", value=50, min_value=0)
+        noise_max = st.number_input("Max Noise (sigma)", value=500, min_value=100)
         noise_steps = st.number_input("Number of Steps", value=10, min_value=3, max_value=20)
         use_matched = st.checkbox("Use Matched Filter", value=True)
         use_wiener = st.checkbox("Use Wiener Filter", value=True)
     
-    if st.button("🧪 Run Robustness Test", key="robust_btn"):
+    if st.button("Run Robustness Test", key="robust_btn"):
         with st.spinner("Running noise sweep..."):
             # Generate clean signal
             config = SimulationConfig(duration=500, num_particles=1000, dt=0.1)
@@ -346,8 +576,14 @@ with tab3:
                     use_wiener=False
                 ))
                 result_std = decoder_std.process_batch(noisy, dt_ms)
-                metrics_std = summarize_detection(true_spikes, result_std["spike_indices"], dt_ms)
-                f1_standard.append(metrics_std["f1_score"])
+                metrics_std = summarize_detection(
+                    decoder_std,
+                    result_std["spike_indices"],
+                    true_spikes,
+                    result_std["preprocessed"],
+                    dt_ms=dt_ms
+                )
+                f1_standard.append(metrics_std.f1_score)
                 
                 # Robust decoder
                 decoder_robust = SignalExtractor(DecodingParams(
@@ -355,25 +591,31 @@ with tab3:
                     use_wiener=use_wiener
                 ))
                 result_robust = decoder_robust.process_batch(noisy, dt_ms)
-                metrics_robust = summarize_detection(true_spikes, result_robust["spike_indices"], dt_ms)
-                f1_robust.append(metrics_robust["f1_score"])
+                metrics_robust = summarize_detection(
+                    decoder_robust,
+                    result_robust["spike_indices"],
+                    true_spikes,
+                    result_robust["preprocessed"],
+                    dt_ms=dt_ms
+                )
+                f1_robust.append(metrics_robust.f1_score)
             
             with col1:
-                fig, ax = plt.subplots(figsize=(10, 6), facecolor='#0e1117')
-                ax.set_facecolor('#1a1a2e')
+                fig, ax = plt.subplots(figsize=(10, 6), facecolor='#0b1020')
+                ax.set_facecolor('#121a2d')
                 
-                ax.plot(noise_levels, f1_standard, 'o-', color='#FF6B6B', linewidth=2, 
+                ax.plot(noise_levels, f1_standard, 'o-', color='#ff6b6b', linewidth=2,
                         markersize=8, label='Standard Decoder')
-                ax.plot(noise_levels, f1_robust, 's-', color='#4ECDC4', linewidth=2, 
+                ax.plot(noise_levels, f1_robust, 's-', color='#2ec4b6', linewidth=2,
                         markersize=8, label='Robust Decoder (MF + Wiener)')
                 
-                ax.fill_between(noise_levels, f1_standard, f1_robust, 
-                               alpha=0.3, color='#4ECDC4')
+                ax.fill_between(noise_levels, f1_standard, f1_robust,
+                               alpha=0.3, color='#2ec4b6')
                 
-                ax.axhline(0.8, color='#FFEAA7', linestyle='--', linewidth=2, 
+                ax.axhline(0.8, color='#f6c453', linestyle='--', linewidth=2,
                           label='Acceptable F1 = 0.8')
                 
-                ax.set_xlabel('Thermal Noise σ (photon counts)', color='white', fontsize=12)
+                ax.set_xlabel('Thermal Noise (sigma, photon counts)', color='white', fontsize=12)
                 ax.set_ylabel('F1 Score', color='white', fontsize=12)
                 ax.set_title('Spike Detection Performance vs Noise Level', 
                             color='white', fontsize=14, fontweight='bold')
@@ -390,7 +632,7 @@ with tab3:
             
             # Summary metrics
             improvement = np.mean(np.array(f1_robust) - np.array(f1_standard))
-            st.info(f"📈 Average F1 improvement with robust decoder: **+{improvement:.3f}**")
+            st.info(f"Average F1 improvement with robust decoder: **+{improvement:.3f}**")
 
 # ============================================================================
 # TAB 4: Live Simulation
@@ -398,7 +640,7 @@ with tab3:
 with tab4:
     st.header("Interactive Forward/Inverse Simulation")
     
-    if st.button("▶️ Run Full Simulation", key="sim_btn", type="primary"):
+    if st.button("Run Full Simulation", key="sim_btn", type="primary"):
         with st.spinner("Running simulation..."):
             # Configure simulation
             config = SimulationConfig(
@@ -432,11 +674,28 @@ with tab4:
             decoded = decoder.process_batch(corrupted["noisy_signal"], config.dt)
             
             # Evaluation
-            metrics = summarize_detection(
-                sim_result["spikes"],
+            summary = summarize_detection(
+                decoder,
                 decoded["spike_indices"],
-                config.dt
+                sim_result["spikes"],
+                decoded["preprocessed"],
+                dt_ms=config.dt
             )
+
+            eval_metrics = decoder.evaluate_reconstruction(
+                decoded["spike_indices"],
+                sim_result["spikes"],
+                tolerance_samples=max(1, int(1.0 / config.dt))
+            )
+            true_indices = np.where(sim_result["spikes"])[0]
+            timing_errors = []
+            for det in decoded["spike_indices"]:
+                if len(true_indices) == 0:
+                    break
+                closest = true_indices[np.argmin(np.abs(true_indices - det))]
+                timing_errors.append(abs(closest - det) * config.dt)
+            timing_errors = np.array(timing_errors, dtype=float)
+            std_timing_error_ms = float(np.std(timing_errors)) if timing_errors.size else float("nan")
             
             # Display results
             st.subheader("Simulation Results")
@@ -444,15 +703,15 @@ with tab4:
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("True Spikes", int(np.sum(sim_result["spikes"])))
             col2.metric("Detected Spikes", len(decoded["spike_indices"]))
-            col3.metric("F1 Score", f"{metrics['f1_score']:.3f}")
+            col3.metric("F1 Score", f"{summary.f1_score:.3f}")
             col4.metric("SSNR", f"{decoded['metrics'].ssnr:.2e}")
             
             # Plot results
-            fig, axes = plt.subplots(4, 1, figsize=(12, 10), facecolor='#0e1117')
+            fig, axes = plt.subplots(4, 1, figsize=(12, 10), facecolor='#0b1020')
             time = sim_result["time"]
             
             for ax in axes:
-                ax.set_facecolor('#1a1a2e')
+                ax.set_facecolor('#121a2d')
                 ax.tick_params(colors='white')
                 for spine in ax.spines.values():
                     spine.set_color('white')
@@ -467,12 +726,12 @@ with tab4:
             
             # Plot 2: Clean photon signal
             axes[1].plot(time, sim_result["delta_N_ph"], color='#FFEAA7', linewidth=0.8)
-            axes[1].set_ylabel('ΔN_ph', color='white')
+            axes[1].set_ylabel('Delta N_ph', color='white')
             axes[1].set_title('Clean Differential Photon Count', color='white', fontweight='bold')
             
             # Plot 3: Noisy signal
             axes[2].plot(time, corrupted["noisy_signal"], color='#DDA0DD', linewidth=0.5, alpha=0.8)
-            axes[2].set_ylabel('ΔN_ph (noisy)', color='white')
+            axes[2].set_ylabel('Delta N_ph (noisy)', color='white')
             axes[2].set_title('Noisy Signal (After Adversarial Corruption)', color='white', fontweight='bold')
             
             # Plot 4: Decoded spikes
@@ -502,20 +761,20 @@ with tab4:
                 st.markdown(f"""
                 | Metric | Value |
                 |--------|-------|
-                | Precision | {metrics['precision']:.3f} |
-                | Recall | {metrics['recall']:.3f} |
-                | F1 Score | {metrics['f1_score']:.3f} |
-                | True Positives | {metrics['true_positives']} |
-                | False Positives | {metrics['false_positives']} |
-                | False Negatives | {metrics['false_negatives']} |
+                | Precision | {summary.precision:.3f} |
+                | Recall | {summary.recall:.3f} |
+                | F1 Score | {summary.f1_score:.3f} |
+                | True Positives | {eval_metrics['true_positives']} |
+                | False Positives | {eval_metrics['false_positives']} |
+                | False Negatives | {eval_metrics['false_negatives']} |
                 """)
             
             with perf_col2:
                 st.markdown(f"""
                 | Timing | Value |
                 |--------|-------|
-                | Mean Error | {metrics['mean_timing_error_ms']:.2f} ms |
-                | Std Error | {metrics['std_timing_error_ms']:.2f} ms |
+                | Mean Error | {summary.mean_timing_error_ms:.2f} ms |
+                | Std Error | {std_timing_error_ms:.2f} ms |
                 | Processing Time | {decoded['metrics'].processing_time_ms:.1f} ms |
                 | Artifact Fraction | {decoded['metrics'].artifact_fraction*100:.1f}% |
                 """)
@@ -525,7 +784,7 @@ st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #5A6C7D;'>
-        <p>Neuro-SWARM³ SDK | NIR-II Nanoparticle Neural Recording System</p>
+        <p>Neuro-SWARM3 SDK | NIR-II Nanoparticle Neural Recording System</p>
         <p>Reference: Hardy et al., IEEE Photonics Technology Letters, 2021</p>
     </div>
     """,

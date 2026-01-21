@@ -35,6 +35,7 @@ def summarize_detection(
     signal: NDArray[np.float64],
     baseline_photons: float = 1e5,
     tolerance_samples: int = 5,
+    dt_ms: float = 1.0,
 ) -> DetectionSummary:
     """
     Summarize detection performance with precision/recall/F1 and SSNR.
@@ -53,13 +54,14 @@ def summarize_detection(
         closest = true_indices[np.argmin(np.abs(true_indices - det))]
         timing_errors.append(abs(closest - det))
     mean_timing_error = float(np.mean(timing_errors)) if timing_errors else float("nan")
+    mean_timing_error_ms = mean_timing_error * dt_ms
 
     return DetectionSummary(
         precision=eval_metrics["precision"],
         recall=eval_metrics["recall"],
         f1_score=eval_metrics["f1_score"],
         ssnr=ssnr,
-        mean_timing_error_ms=mean_timing_error,
+        mean_timing_error_ms=mean_timing_error_ms,
     )
 
 
