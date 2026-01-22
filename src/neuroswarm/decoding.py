@@ -727,7 +727,15 @@ class SignalExtractor:
                 dt_ms,
                 window_ms=self.params.matched_filter_window_ms
             )
-            spike_indices, spike_amplitudes = self.detect_spikes(mf_output, dt_ms)
+            spike_indices, _ = self.detect_spikes(mf_output, dt_ms)
+            # Align matched-filter detections to the original signal timeline
+            shift_samples = int(0.5 * self.params.matched_filter_window_ms / dt_ms)
+            if shift_samples > 0 and len(spike_indices) > 0:
+                spike_indices = spike_indices - shift_samples
+                spike_indices = spike_indices[
+                    (spike_indices >= 0) & (spike_indices < len(preprocessed))
+                ]
+            spike_amplitudes = preprocessed[spike_indices] if len(spike_indices) > 0 else np.array([])
         else:
             spike_indices, spike_amplitudes = self.detect_spikes(preprocessed, dt_ms)
 

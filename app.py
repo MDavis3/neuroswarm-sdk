@@ -540,9 +540,10 @@ with tab3:
     
     with col2:
         st.subheader("Test Parameters")
-        noise_min = st.number_input("Min Noise (sigma)", value=50, min_value=0)
-        noise_max = st.number_input("Max Noise (sigma)", value=500, min_value=100)
+        noise_min = st.number_input("Min Noise (% of signal std)", value=5, min_value=0)
+        noise_max = st.number_input("Max Noise (% of signal std)", value=50, min_value=5)
         noise_steps = st.number_input("Number of Steps", value=10, min_value=3, max_value=20)
+        noise_trials = st.number_input("Trials per Level", value=5, min_value=1, max_value=20)
         use_matched = st.checkbox("Use Matched Filter", value=True)
         use_wiener = st.checkbox("Use Wiener Filter", value=True)
     
@@ -564,49 +565,67 @@ with tab3:
                 )
             
             noise_levels = np.linspace(noise_min, noise_max, noise_steps)
+            signal_scale = np.std(clean_signal)
             
             # Results storage
             f1_standard = []
             f1_robust = []
             
             for noise_std in noise_levels:
+                f1_trials_std = []
+                f1_trials_robust = []
+                for trial in range(int(noise_trials)):
                 # Corrupt signal
-                noise_params = NoiseParams(thermal_noise_std=noise_std, seed=42)
-                noise_gen = AdversarialNoiseGenerator(noise_params)
-                corrupted = noise_gen.corrupt_signal(clean_signal, dt_ms)
-                noisy = corrupted["noisy_signal"]
+                    noise_params = NoiseParams(
+                        shot_noise_enabled=False,
+                        thermal_noise_std=(noise_std / 100.0) * signal_scale,
+                        drift_amplitude=0.0,
+                        burst_probability=0.0,
+                        intensity_fluctuation_std=0.0,
+                        seed=42 + trial
+                    )
+                    noise_gen = AdversarialNoiseGenerator(noise_params)
+                    corrupted = noise_gen.corrupt_signal(clean_signal, dt_ms)
+                    noisy = corrupted["noisy_signal"]
                 
                 # Standard decoder
-                decoder_std = SignalExtractor(DecodingParams(
-                    use_matched_filter=False,
-                    use_wiener=False
-                ))
-                result_std = decoder_std.process_batch(noisy, dt_ms)
-                metrics_std = summarize_detection(
-                    decoder_std,
-                    result_std["spike_indices"],
-                    true_spikes,
-                    result_std["preprocessed"],
-                    dt_ms=dt_ms,
-                    tolerance_samples=tolerance_samples
-                )
-                f1_standard.append(metrics_std.f1_score)
+                    decoder_std = SignalExtractor(DecodingParams(
+                        spike_threshold=4.0,
+                        spike_refractory_ms=6.0,
+                        use_matched_filter=False,
+                        use_wiener=False
+                    ))
+                    result_std = decoder_std.process_batch(noisy, dt_ms)
+                    metrics_std = summarize_detection(
+                        decoder_std,
+                        result_std["spike_indices"],
+                        true_spikes,
+                        result_std["preprocessed"],
+                        dt_ms=dt_ms,
+                        tolerance_samples=tolerance_samples
+                    )
+                    f1_trials_std.append(metrics_std.f1_score)
                 
                 # Robust decoder
-                decoder_robust = SignalExtractor(DecodingParams(
-                    use_matched_filter=use_matched,
-                    use_wiener=use_wiener
-                ))
-                result_robust = decoder_robust.process_batch(noisy, dt_ms)
-                metrics_robust = summarize_detection(
-                    decoder_robust,
-                    result_robust["spike_indices"],
-                    true_spikes,
-                    result_robust["preprocessed"],
-                    dt_ms=dt_ms,
-                    tolerance_samples=tolerance_samples
-                )
-                f1_robust.append(metrics_robust.f1_score)
+                    decoder_robust = SignalExtractor(DecodingParams(
+                        spike_threshold=4.0,
+                        spike_refractory_ms=6.0,
+                        use_matched_filter=use_matched,
+                        use_wiener=use_wiener
+                    ))
+                    result_robust = decoder_robust.process_batch(noisy, dt_ms)
+                    metrics_robust = summarize_detection(
+                        decoder_robust,
+                        result_robust["spike_indices"],
+                        true_spikes,
+                        result_robust["preprocessed"],
+                        dt_ms=dt_ms,
+                        tolerance_samples=tolerance_samples
+                    )
+                    f1_trials_robust.append(metrics_robust.f1_score)
+
+                f1_standard.append(float(np.mean(f1_trials_std)))
+                f1_robust.append(float(np.mean(f1_trials_robust)))
             
             with col1:
                 fig, ax = plt.subplots(figsize=(10, 6), facecolor='#0b1020')
@@ -623,7 +642,7 @@ with tab3:
                 ax.axhline(0.8, color='#f6c453', linestyle='--', linewidth=2,
                           label='Acceptable F1 = 0.8')
                 
-                ax.set_xlabel('Thermal Noise (sigma, photon counts)', color='white', fontsize=12)
+                ax.set_xlabel('Thermal Noise (% of signal std)', color='white', fontsize=12)
                 ax.set_ylabel('F1 Score', color='white', fontsize=12)
                 ax.set_title('Spike Detection Performance vs Noise Level', 
                             color='white', fontsize=14, fontweight='bold')
@@ -676,6 +695,8 @@ with tab4:
             
             # Inverse model (decoder)
             decoder = SignalExtractor(DecodingParams(
+                spike_threshold=4.0,
+                spike_refractory_ms=6.0,
                 use_matched_filter=True,
                 use_wiener=True
             ))
