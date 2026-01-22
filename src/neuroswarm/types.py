@@ -332,11 +332,33 @@ class WavelengthSweepParams:
         max_wavelength: Maximum wavelength to scan (nm)
         step_nm: Wavelength step size (nm)
         electric_field: Fixed field strength for sweep (mV/nm)
+        apply_tissue_attenuation: Apply wavelength-dependent tissue attenuation
+        tissue_mu0_cm_inv: Base attenuation coefficient at reference wavelength (1/cm)
+        tissue_mu_slope_cm_inv: Attenuation slope across NIR-II (1/cm)
+        tissue_mu_ref_nm: Reference wavelength for attenuation (nm)
+        tissue_path_length_cm: Effective optical path length (cm)
+        tissue_mu_power: Power for attenuation wavelength dependence
+        apply_detector_qe: Apply wavelength-dependent detector quantum efficiency
+        detector_qe_max: QE at reference wavelength (0-1)
+        detector_qe_min: Minimum QE (0-1)
+        detector_qe_ref_nm: Reference wavelength for QE (nm)
+        detector_qe_slope: Linear QE drop across NIR-II (fraction)
     """
     min_wavelength: float = 1000.0
     max_wavelength: float = 1700.0
     step_nm: float = 10.0
     electric_field: float = 3.0
+    apply_tissue_attenuation: bool = False
+    tissue_mu0_cm_inv: float = 0.8
+    tissue_mu_slope_cm_inv: float = 2.0
+    tissue_mu_ref_nm: float = 1000.0
+    tissue_path_length_cm: float = 0.5
+    tissue_mu_power: float = 1.0
+    apply_detector_qe: bool = False
+    detector_qe_max: float = 0.8
+    detector_qe_min: float = 0.2
+    detector_qe_ref_nm: float = 1000.0
+    detector_qe_slope: float = 0.6
 
     def __post_init__(self) -> None:
         if self.min_wavelength < 1000 or self.max_wavelength > 1700:
@@ -347,6 +369,20 @@ class WavelengthSweepParams:
             raise ValueError(f"step_nm must be positive, got {self.step_nm}")
         if self.min_wavelength >= self.max_wavelength:
             raise ValueError("min_wavelength must be less than max_wavelength")
+        if self.tissue_mu0_cm_inv < 0 or self.tissue_mu_slope_cm_inv < 0:
+            raise ValueError("tissue attenuation coefficients must be non-negative")
+        if self.tissue_path_length_cm < 0:
+            raise ValueError("tissue_path_length_cm must be non-negative")
+        if self.tissue_mu_power <= 0:
+            raise ValueError("tissue_mu_power must be positive")
+        if not (0 < self.detector_qe_max <= 1):
+            raise ValueError("detector_qe_max must be in (0, 1]")
+        if not (0 < self.detector_qe_min <= 1):
+            raise ValueError("detector_qe_min must be in (0, 1]")
+        if self.detector_qe_min > self.detector_qe_max:
+            raise ValueError("detector_qe_min must be <= detector_qe_max")
+        if self.detector_qe_slope < 0:
+            raise ValueError("detector_qe_slope must be non-negative")
 
 
 @dataclass

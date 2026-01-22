@@ -50,10 +50,12 @@ class DecodingParams:
             gives ~0.13% false positive rate, suitable for typical SNR conditions.
         spike_refractory_ms: Minimum inter-spike interval (ms). Default 2 ms matches
             the absolute refractory period of neurons (Hodgkin & Huxley, 1952).
+        detect_polarity: Which spike polarity to detect ("positive", "negative", "both").
         target_resolution_ms: Target temporal resolution (ms). Default 1 ms matches
             the integration time in Hardy et al. (2021).
         use_matched_filter: Enable matched filter spike detection.
         matched_filter_window_ms: Spike template window length (ms).
+        matched_filter_template: Optional custom spike template for matched filter.
         use_wiener: Enable Wiener deconvolution for noise-optimal filtering.
         wiener_noise_floor: Noise floor added to PSD for numerical stability.
         wiener_highfreq_hz: High-frequency band for noise PSD estimation (Hz).
@@ -72,10 +74,12 @@ class DecodingParams:
     # Spike detection
     spike_threshold: float = 3.0        # std - ~0.13% FP rate
     spike_refractory_ms: float = 2.0    # ms - absolute refractory period
+    detect_polarity: str = "positive"
     target_resolution_ms: float = 1.0   # ms - per Hardy et al. (2021)
     # Advanced options
     use_matched_filter: bool = False
     matched_filter_window_ms: float = 6.0
+    matched_filter_template: Optional[NDArray[np.float64]] = None
     use_wiener: bool = False
     wiener_noise_floor: float = 1e-6
     wiener_highfreq_hz: float = 300.0
@@ -107,6 +111,11 @@ class DecodingParams:
         if self.spike_threshold <= 0:
             raise ValueError(
                 f"spike_threshold must be positive, got {self.spike_threshold}"
+            )
+        if self.detect_polarity not in ("positive", "negative", "both"):
+            raise ValueError(
+                "detect_polarity must be 'positive', 'negative', or 'both', "
+                f"got '{self.detect_polarity}'"
             )
         if self.matched_filter_window_ms <= 0:
             raise ValueError(
@@ -156,6 +165,49 @@ class MatchedFilterDetector:
 
     def __init__(self) -> None:
         self._template_cache: Dict[float, NDArray[np.float64]] = {}
+        self._alignment_cache: Dict[float, int] = {}
+
+    @staticmethod
+    def _fit_template_length(
+        template: NDArray[np.float64],
+        target_len: int
+    ) -> NDArray[np.float64]:
+        if target_len <= 0:
+            raise ValueError("target_len must be positive")
+        if len(template) == target_len:
+            return template
+        if len(template) > target_len:
+            start = (len(template) - target_len) // 2
+            end = start + target_len
+            return template[start:end]
+        # Pad symmetrically
+        pad_total = target_len - len(template)
+        pad_left = pad_total // 2
+        pad_right = pad_total - pad_left
+        return np.pad(template, (pad_left, pad_right), mode="constant")
+
+    @staticmethod
+    def _compute_alignment_shift(template: NDArray[np.float64]) -> int:
+        center = len(template) // 2
+        peak_idx = int(np.argmax(np.abs(template)))
+        # Shift detected indices to align to the template peak
+        return peak_idx - center
+
+    def set_template(
+        self,
+        dt_ms: float,
+        window_ms: float,
+        template: NDArray[np.float64]
+    ) -> None:
+        """Set a custom matched-filter template for the given window."""
+        key = round(window_ms / dt_ms, 4)
+        target_len = int(max(1, round(window_ms / dt_ms)))
+        fitted = self._fit_template_length(template, target_len)
+        fitted = fitted - np.mean(fitted)
+        norm = np.linalg.norm(fitted) + 1e-12
+        fitted = fitted / norm
+        self._template_cache[key] = fitted
+        self._alignment_cache[key] = self._compute_alignment_shift(fitted)
 
     def _generate_template(self, dt_ms: float, window_ms: float) -> NDArray[np.float64]:
         """Generate spike template using Izhikevich neuron dynamics."""
@@ -189,16 +241,19 @@ class MatchedFilterDetector:
         signal: NDArray[np.float64],
         dt_ms: float,
         window_ms: float = 6.0
-    ) -> NDArray[np.float64]:
-        """Apply matched filter and return correlation output."""
+    ) -> Tuple[NDArray[np.float64], int]:
+        """Apply matched filter and return correlation output with alignment shift."""
         key = round(window_ms / dt_ms, 4)
         if key not in self._template_cache:
-            self._template_cache[key] = self._generate_template(dt_ms, window_ms)
+            template = self._generate_template(dt_ms, window_ms)
+            self._template_cache[key] = template
+            self._alignment_cache[key] = self._compute_alignment_shift(template)
 
         template = self._template_cache[key]
         # Matched filter: correlate with reversed template
         output = np.convolve(signal, template[::-1], mode="same")
-        return output
+        shift = self._alignment_cache.get(key, 0)
+        return output, shift
 
 
 class WienerFilter:
@@ -528,13 +583,18 @@ class SignalExtractor:
         # Why 3σ threshold (default): For Gaussian noise, P(X > 3σ) ≈ 0.13%
         # This gives ~1.3 false positives per 1000 samples, acceptable for most
         # neural recording scenarios. Increase to 4-5σ for higher specificity.
-        std = np.std(signal)
+        if p.detect_polarity == "both":
+            working = np.abs(signal)
+        elif p.detect_polarity == "negative":
+            working = -signal
+        else:
+            working = signal
+
+        std = np.std(working)
         threshold = p.spike_threshold * std
 
-        # Find threshold crossings (positive peaks)
-        # We detect positive-going spikes; extracellular action potentials typically
-        # appear as positive deflections in the differential photon signal.
-        above_threshold = signal > threshold
+        # Find threshold crossings (positive peaks in selected polarity)
+        above_threshold = working > threshold
 
         # Find rising edges (0→1 transitions in thresholded signal)
         crossings = np.diff(above_threshold.astype(int))
@@ -557,7 +617,7 @@ class SignalExtractor:
 
             # Find peak within window
             end = min(start + refractory_samples, len(signal))
-            window = signal[start:end]
+            window = working[start:end]
             peak_offset = np.argmax(window)
             peak_idx = start + peak_offset
 
@@ -722,16 +782,21 @@ class SignalExtractor:
 
         # Detect spikes (matched filter optional)
         if self.params.use_matched_filter:
-            mf_output = self._matched_filter.apply(
+            if self.params.matched_filter_template is not None:
+                self._matched_filter.set_template(
+                    dt_ms,
+                    self.params.matched_filter_window_ms,
+                    self.params.matched_filter_template
+                )
+            mf_output, shift_samples = self._matched_filter.apply(
                 preprocessed,
                 dt_ms,
                 window_ms=self.params.matched_filter_window_ms
             )
             spike_indices, _ = self.detect_spikes(mf_output, dt_ms)
-            # Align matched-filter detections to the original signal timeline
-            shift_samples = int(0.5 * self.params.matched_filter_window_ms / dt_ms)
-            if shift_samples > 0 and len(spike_indices) > 0:
-                spike_indices = spike_indices - shift_samples
+            # Align matched-filter detections to the template peak
+            if shift_samples != 0 and len(spike_indices) > 0:
+                spike_indices = spike_indices + shift_samples
                 spike_indices = spike_indices[
                     (spike_indices >= 0) & (spike_indices < len(preprocessed))
                 ]

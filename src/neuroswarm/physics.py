@@ -643,7 +643,22 @@ class NeuroSwarmPhysics:
                 delta_q = q_mod - q_base
                 delta_n = self.calculate_photon_count(np.array([delta_q]))[0]
                 baseline = self._compute_baseline_photons()
-                delta_n_ph[i] = abs(delta_n)
+
+                attenuation = 1.0
+                if params.apply_tissue_attenuation:
+                    wl_norm = max(0.0, (wavelength - params.tissue_mu_ref_nm) / 700.0)
+                    mu_eff = params.tissue_mu0_cm_inv + params.tissue_mu_slope_cm_inv * (wl_norm ** params.tissue_mu_power)
+                    attenuation *= float(np.exp(-mu_eff * params.tissue_path_length_cm))
+
+                detector_qe = 1.0
+                if params.apply_detector_qe:
+                    wl_norm = max(0.0, (wavelength - params.detector_qe_ref_nm) / 700.0)
+                    detector_qe = params.detector_qe_max - params.detector_qe_slope * wl_norm
+                    detector_qe = float(np.clip(detector_qe, params.detector_qe_min, params.detector_qe_max))
+
+                response = attenuation * detector_qe
+                delta_n_ph[i] = abs(delta_n) * response
+                baseline *= response
                 ssnr[i] = (delta_n_ph[i] / baseline) * np.sqrt(baseline) if baseline > 0 else 0.0
         finally:
             self.config.optical.wavelength = original_wavelength

@@ -13,11 +13,12 @@ sys.path.insert(0, "src")
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Optional
 from matplotlib.patches import Circle, FancyArrowPatch
 import matplotlib.patches as mpatches
 
 # Import neuroswarm modules
-from neuroswarm.physics import NeuroSwarmPhysics, IzhikevichNeuron
+from neuroswarm.physics import NeuroSwarmPhysics, IzhikevichNeuron, compress_to_integration_time
 from neuroswarm.noise import AdversarialNoiseGenerator, NoiseParams
 from neuroswarm.decoding import SignalExtractor, DecodingParams
 from neuroswarm.types import (
@@ -301,15 +302,62 @@ st.markdown(
 
 # Sidebar configuration
 st.sidebar.header("Simulation Controls")
-st.sidebar.caption("Tweak the in silico experiment and noise conditions.")
+st.sidebar.caption("Presentation-optimized defaults. Enable extra noise for stress tests.")
+
+# Preset callbacks
+def apply_fast_mode() -> None:
+    if st.session_state.get("fast_mode"):
+        st.session_state["realism_mode"] = False
+        st.session_state["duration_ms"] = 600
+        st.session_state["num_particles"] = 500
+        st.session_state["input_rate"] = 15
+        st.session_state["thermal_noise"] = 50
+        st.session_state["drift_amp_pct"] = 0
+        st.session_state["enable_drift"] = False
+        st.session_state["enable_bursts"] = False
+        st.session_state["enable_intensity"] = False
+        st.session_state["use_integration_compression"] = True
+        st.session_state["enable_shot_noise"] = True
+
+
+def apply_realism_mode() -> None:
+    if st.session_state.get("realism_mode"):
+        st.session_state["fast_mode"] = False
+        st.session_state["duration_ms"] = 1000
+        st.session_state["num_particles"] = 1500
+        st.session_state["input_rate"] = 12
+        st.session_state["thermal_noise"] = 100
+        st.session_state["drift_amp_pct"] = 1
+        st.session_state["enable_drift"] = True
+        st.session_state["enable_bursts"] = False
+        st.session_state["enable_intensity"] = False
+        st.session_state["use_integration_compression"] = True
+        st.session_state["enable_shot_noise"] = True
 
 # Simulation duration
 duration_ms = st.sidebar.slider(
     "Simulation Duration (ms)",
     min_value=100,
     max_value=2000,
-    value=500,
-    step=100
+    value=1000,
+    step=100,
+    key="duration_ms"
+)
+
+# Fast/realism mode toggles
+fast_mode = st.sidebar.checkbox(
+    "Fast Mode (interactive)",
+    value=True,
+    key="fast_mode",
+    on_change=apply_fast_mode,
+    help="Speeds up the live simulation by reducing time resolution, particles, and duration."
+)
+realism_mode = st.sidebar.checkbox(
+    "Realism Mode (interactive)",
+    value=False,
+    key="realism_mode",
+    on_change=apply_realism_mode,
+    help="Applies a more realistic noise profile for the live simulation."
 )
 
 # Number of particles
@@ -317,8 +365,9 @@ num_particles = st.sidebar.slider(
     "Number of Nanoparticles",
     min_value=100,
     max_value=5000,
-    value=1000,
-    step=100
+    value=2000,
+    step=100,
+    key="num_particles"
 )
 
 # Input rate
@@ -326,23 +375,85 @@ input_rate = st.sidebar.slider(
     "Neural Input Rate (Hz)",
     min_value=1,
     max_value=50,
-    value=10
+    value=15,
+    key="input_rate"
 )
 
 # Noise parameters
-st.sidebar.subheader("Noise Settings")
+st.sidebar.subheader("Noise Settings (Advanced)")
 thermal_noise = st.sidebar.slider(
-    "Thermal Noise (sigma)",
+    "Thermal Noise (std, photon counts)",
     min_value=0,
     max_value=500,
-    value=100
+    value=50,
+    key="thermal_noise"
 )
-drift_amplitude = st.sidebar.slider(
-    "Drift Amplitude (%)",
+drift_amp_pct = st.sidebar.slider(
+    "Drift Amplitude (% of baseline photons)",
     min_value=0,
     max_value=20,
-    value=5
+    value=0,
+    key="drift_amp_pct"
 ) / 100.0
+drift_amplitude = drift_amp_pct
+
+st.sidebar.subheader("Reproducibility")
+sim_seed = st.sidebar.number_input(
+    "Random Seed",
+    min_value=0,
+    max_value=100000,
+    value=42,
+    step=1,
+    help="Seed for input pulse timing and noise generation."
+)
+
+use_integration_compression = st.sidebar.checkbox(
+    "Use 1 ms integration compression",
+    value=True,
+    key="use_integration_compression",
+    help="Compress the 0.1 ms simulation to match the 1 ms optical integration time."
+)
+enable_shot_noise = st.sidebar.checkbox("Enable Shot Noise", value=True, key="enable_shot_noise")
+enable_drift = st.sidebar.checkbox("Enable Drift", value=False, key="enable_drift")
+enable_bursts = st.sidebar.checkbox("Enable Burst Artifacts", value=False, key="enable_bursts")
+enable_intensity = st.sidebar.checkbox("Enable Intensity Fluctuations", value=False, key="enable_intensity")
+
+burst_probability = 0.0
+burst_amplitude = 0.0
+burst_duration_ms = 0.0
+if enable_bursts:
+    burst_probability = st.sidebar.slider(
+        "Burst Probability",
+        min_value=0.0,
+        max_value=0.01,
+        value=0.002,
+        step=0.0005,
+        format="%.4f"
+    )
+    burst_amplitude = st.sidebar.slider(
+        "Burst Amplitude (counts)",
+        min_value=500.0,
+        max_value=10000.0,
+        value=3000.0,
+        step=250.0
+    )
+    burst_duration_ms = st.sidebar.slider(
+        "Burst Duration (ms)",
+        min_value=1.0,
+        max_value=10.0,
+        value=5.0,
+        step=1.0
+    )
+
+intensity_std = 0.0
+if enable_intensity:
+    intensity_std = st.sidebar.slider(
+        "Intensity Fluctuation Std (%)",
+        min_value=0.0,
+        max_value=10.0,
+        value=2.0,
+        step=0.5
+    ) / 100.0
 
 # Main tabs
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -351,6 +462,36 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "Noise Robustness",
     "Live Simulation"
 ])
+
+
+def compress_spikes_to_integration(spikes: np.ndarray, factor: int) -> np.ndarray:
+    if factor <= 1:
+        return spikes
+    n_bins = len(spikes) // factor
+    if n_bins <= 0:
+        return spikes
+    trimmed = spikes[:n_bins * factor]
+    reshaped = trimmed.reshape(n_bins, factor)
+    return np.any(reshaped, axis=1)
+
+
+def extract_spike_template(
+    signal: np.ndarray,
+    spike_indices: np.ndarray,
+    window_samples: int
+) -> Optional[np.ndarray]:
+    if len(spike_indices) == 0 or window_samples <= 0:
+        return None
+    center = int(spike_indices[0])
+    half = window_samples // 2
+    start = center - half
+    end = start + window_samples
+    template = np.zeros(window_samples, dtype=float)
+    src_start = max(0, start)
+    src_end = min(len(signal), end)
+    dst_start = src_start - start
+    template[dst_start:dst_start + (src_end - src_start)] = signal[src_start:src_end]
+    return template
 
 # ============================================================================
 # TAB 1: Pipeline Overview
@@ -397,6 +538,8 @@ with tab1:
                 x + box_width/2, y_center,
                 name, ha='center', va='center',
                 fontsize=9, fontweight='bold', color='#0b1020',
+                multialignment='center',
+                linespacing=0.95,
                 transform=ax.transAxes, zorder=3
             )
             
@@ -424,13 +567,6 @@ with tab1:
             color='white', transform=ax.transAxes
         )
         
-        # Separator line (use plot instead of axhline for transform support)
-        ax.plot([0.52, 0.58], [0.5, 0.5], color='#FF6B6B', 
-                linestyle='--', linewidth=2, transform=ax.transAxes)
-        ax.text(0.55, 0.75, "Forward Model", ha='center', fontsize=10,
-                color='#2ec4b6', transform=ax.transAxes)
-        ax.text(0.85, 0.75, "Inverse Model", ha='center', fontsize=10,
-                color='#ff6b6b', transform=ax.transAxes)
         
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
@@ -475,6 +611,32 @@ with tab2:
         max_wl = st.number_input("Max Wavelength (nm)", value=1700, min_value=1300, max_value=1800)
         step_wl = st.number_input("Step Size (nm)", value=25, min_value=5, max_value=50)
         e_field = st.number_input("Electric Field (mV/nm)", value=3.0, min_value=0.5, max_value=12.0)
+        presentation_mode = st.checkbox(
+            "Presentation mode (no attenuation/QE)",
+            value=True,
+            help="Disable tissue attenuation and detector QE roll-off."
+        )
+        apply_atten = False
+        apply_qe = False
+        path_cm = 0.5
+        mu0 = 0.8
+        mu_slope = 2.0
+        mu_power = 1.0
+        qe_max = 0.8
+        qe_min = 0.2
+        qe_slope = 0.6
+        if not presentation_mode:
+            st.caption("Tissue attenuation model")
+            apply_atten = st.checkbox("Apply tissue attenuation", value=True)
+            path_cm = st.number_input("Path length (cm)", value=0.5, min_value=0.0, max_value=2.0, step=0.1)
+            mu0 = st.number_input("Base attenuation (1/cm)", value=0.8, min_value=0.0, max_value=5.0, step=0.1)
+            mu_slope = st.number_input("Attenuation slope (1/cm)", value=2.0, min_value=0.0, max_value=10.0, step=0.2)
+            mu_power = st.number_input("Attenuation power", value=1.0, min_value=0.5, max_value=3.0, step=0.1)
+            st.caption("Detector QE model")
+            apply_qe = st.checkbox("Apply detector QE roll-off", value=True)
+            qe_max = st.number_input("QE max", value=0.8, min_value=0.1, max_value=1.0, step=0.05)
+            qe_min = st.number_input("QE min", value=0.2, min_value=0.05, max_value=1.0, step=0.05)
+            qe_slope = st.number_input("QE slope (fraction)", value=0.6, min_value=0.0, max_value=1.0, step=0.05)
     
     if st.button("Run Wavelength Sweep", key="sweep_btn"):
         with st.spinner("Sweeping wavelengths..."):
@@ -486,7 +648,16 @@ with tab2:
                 min_wavelength=float(min_wl),
                 max_wavelength=float(max_wl),
                 step_nm=float(step_wl),
-                electric_field=float(e_field)
+                electric_field=float(e_field),
+                apply_tissue_attenuation=apply_atten,
+                tissue_mu0_cm_inv=float(mu0),
+                tissue_mu_slope_cm_inv=float(mu_slope),
+                tissue_path_length_cm=float(path_cm),
+                tissue_mu_power=float(mu_power),
+                apply_detector_qe=apply_qe,
+                detector_qe_max=float(qe_max),
+                detector_qe_min=float(qe_min),
+                detector_qe_slope=float(qe_slope),
             )
             
             sweep_result = physics.sweep_wavelengths(sweep_params)
@@ -540,23 +711,35 @@ with tab3:
     
     with col2:
         st.subheader("Test Parameters")
-        noise_min = st.number_input("Min Noise (% of signal std)", value=5, min_value=0)
-        noise_max = st.number_input("Max Noise (% of signal std)", value=50, min_value=5)
-        noise_steps = st.number_input("Number of Steps", value=10, min_value=3, max_value=20)
-        noise_trials = st.number_input("Trials per Level", value=5, min_value=1, max_value=20)
+        noise_min = st.number_input("Min Noise (% of spike peak)", value=2, min_value=0)
+        noise_max = st.number_input("Max Noise (% of spike peak)", value=30, min_value=5)
+        noise_steps = st.number_input("Number of Steps", value=8, min_value=3, max_value=20)
+        noise_trials = st.number_input("Trials per Level", value=3, min_value=1, max_value=20)
         use_matched = st.checkbox("Use Matched Filter", value=True)
         use_wiener = st.checkbox("Use Wiener Filter", value=True)
     
     if st.button("Run Robustness Test", key="robust_btn"):
         with st.spinner("Running noise sweep..."):
             # Generate clean signal
-            config = SimulationConfig(duration=500, num_particles=1000, dt=0.1)
+            # Fast-mode configuration for sweep (presentation-friendly runtime)
+            config = SimulationConfig(duration=500, num_particles=500, dt=1.0)
             physics = NeuroSwarmPhysics(config)
-            sim_result = physics.simulate(input_rate_hz=10)
+            np.random.seed(sim_seed)
+            sim_result = physics.simulate(input_rate_hz=15)
 
             clean_signal = sim_result["delta_N_ph"]
             true_spikes = sim_result["spikes"]
             dt_ms = config.dt
+            if use_integration_compression and config.dt < config.optical.integration_time:
+                compression_factor = int(round(config.optical.integration_time / config.dt))
+                clean_signal = compress_to_integration_time(
+                    clean_signal,
+                    dt=config.dt,
+                    integration_time=config.optical.integration_time,
+                    method="max"
+                )
+                true_spikes = compress_spikes_to_integration(true_spikes, compression_factor)
+                dt_ms = config.optical.integration_time
             tolerance_samples = max(1, int(5.0 / dt_ms))
             if use_matched:
                 tolerance_samples = max(
@@ -565,7 +748,33 @@ with tab3:
                 )
             
             noise_levels = np.linspace(noise_min, noise_max, noise_steps)
-            signal_scale = np.std(clean_signal)
+            spike_peak = float(np.max(np.abs(clean_signal))) if len(clean_signal) else 0.0
+            signal_scale = max(spike_peak, 1.0)
+            baseline_photons = physics._compute_baseline_photons()
+            if dt_ms != config.optical.integration_time:
+                baseline_photons *= (dt_ms / config.optical.integration_time)
+
+            # Build a matched-filter template from a separate run to avoid leakage
+            np.random.seed(sim_seed + 1)
+            template_sim = physics.simulate(input_rate_hz=15)
+            template_signal = template_sim["delta_N_ph"]
+            template_spikes = template_sim["spikes"]
+            if use_integration_compression and config.dt < config.optical.integration_time:
+                template_signal = compress_to_integration_time(
+                    template_signal,
+                    dt=config.dt,
+                    integration_time=config.optical.integration_time,
+                    method="max"
+                )
+                template_spikes = compress_spikes_to_integration(
+                    template_spikes,
+                    int(round(config.optical.integration_time / config.dt))
+                )
+            template = extract_spike_template(
+                template_signal,
+                np.where(template_spikes)[0],
+                int(round(DecodingParams().matched_filter_window_ms / dt_ms))
+            )
             
             # Results storage
             f1_standard = []
@@ -577,25 +786,34 @@ with tab3:
                 for trial in range(int(noise_trials)):
                 # Corrupt signal
                     noise_params = NoiseParams(
-                        shot_noise_enabled=False,
+                        shot_noise_enabled=enable_shot_noise,
                         thermal_noise_std=(noise_std / 100.0) * signal_scale,
-                        drift_amplitude=0.0,
-                        burst_probability=0.0,
-                        intensity_fluctuation_std=0.0,
-                        seed=42 + trial
+                        drift_amplitude=drift_amplitude if enable_drift else 0.0,
+                        burst_probability=burst_probability if enable_bursts else 0.0,
+                        burst_amplitude=burst_amplitude if enable_bursts else 0.0,
+                        burst_duration_ms=burst_duration_ms if enable_bursts else 0.0,
+                        intensity_fluctuation_std=intensity_std if enable_intensity else 0.0,
+                        seed=sim_seed + trial
                     )
                     noise_gen = AdversarialNoiseGenerator(noise_params)
-                    corrupted = noise_gen.corrupt_signal(clean_signal, dt_ms)
+                    corrupted = noise_gen.corrupt_signal(clean_signal, dt_ms, baseline=baseline_photons)
                     noisy = corrupted["noisy_signal"]
                 
                 # Standard decoder
-                    decoder_std = SignalExtractor(DecodingParams(
+                    std_params = DecodingParams(
+                        highpass_freq=1.0,
+                        lowpass_freq=300.0,
+                        filter_order=4,
                         spike_threshold=4.0,
                         spike_refractory_ms=6.0,
+                        detect_polarity="both",
+                        artifact_threshold=6.0,
+                        artifact_interpolate=False,
                         use_matched_filter=False,
                         use_wiener=False
-                    ))
-                    result_std = decoder_std.process_batch(noisy, dt_ms)
+                    )
+                    decoder_std = SignalExtractor(std_params)
+                    result_std = decoder_std.process_batch(noisy, dt_ms, baseline_photons=baseline_photons)
                     metrics_std = summarize_detection(
                         decoder_std,
                         result_std["spike_indices"],
@@ -607,13 +825,23 @@ with tab3:
                     f1_trials_std.append(metrics_std.f1_score)
                 
                 # Robust decoder
-                    decoder_robust = SignalExtractor(DecodingParams(
+                    robust_params = DecodingParams(
+                        highpass_freq=1.0,
+                        lowpass_freq=300.0,
+                        filter_order=4,
                         spike_threshold=4.0,
                         spike_refractory_ms=6.0,
+                        detect_polarity="both",
+                        artifact_threshold=6.0,
+                        artifact_interpolate=False,
                         use_matched_filter=use_matched,
+                        matched_filter_window_ms=6.0,
                         use_wiener=use_wiener
-                    ))
-                    result_robust = decoder_robust.process_batch(noisy, dt_ms)
+                    )
+                    if template is not None:
+                        robust_params.matched_filter_template = template
+                    decoder_robust = SignalExtractor(robust_params)
+                    result_robust = decoder_robust.process_batch(noisy, dt_ms, baseline_photons=baseline_photons)
                     metrics_robust = summarize_detection(
                         decoder_robust,
                         result_robust["spike_indices"],
@@ -642,7 +870,7 @@ with tab3:
                 ax.axhline(0.8, color='#f6c453', linestyle='--', linewidth=2,
                           label='Acceptable F1 = 0.8')
                 
-                ax.set_xlabel('Thermal Noise (% of signal std)', color='white', fontsize=12)
+                ax.set_xlabel('Thermal Noise (% of spike peak)', color='white', fontsize=12)
                 ax.set_ylabel('F1 Score', color='white', fontsize=12)
                 ax.set_title('Spike Detection Performance vs Noise Level', 
                             color='white', fontsize=14, fontweight='bold')
@@ -656,6 +884,11 @@ with tab3:
                 plt.tight_layout()
                 st.pyplot(fig)
                 plt.close()
+
+            st.caption(
+                "Note: noise is scaled as a percentage of the clean spike peak amplitude "
+                "(not the full signal standard deviation)."
+            )
             
             # Summary metrics
             improvement = np.mean(np.array(f1_robust) - np.array(f1_standard))
@@ -670,84 +903,170 @@ with tab4:
     if st.button("Run Full Simulation", key="sim_btn", type="primary"):
         with st.spinner("Running simulation..."):
             # Configure simulation
+            dt_live = 0.1
+            duration_live = duration_ms
+            particles_live = num_particles
+            if fast_mode:
+                dt_live = 1.0
+                duration_live = min(duration_ms, 600)
+                particles_live = min(num_particles, 500)
+
             config = SimulationConfig(
-                duration=duration_ms,
-                num_particles=num_particles,
-                dt=0.1
+                duration=duration_live,
+                num_particles=particles_live,
+                dt=dt_live
             )
             
             # Forward model
             physics = NeuroSwarmPhysics(config)
+            np.random.seed(sim_seed)
             sim_result = physics.simulate(input_rate_hz=input_rate)
-            
+            time_raw = sim_result["time"]
+            membrane_raw = sim_result["membrane_potential"]
+
+            clean_signal = sim_result["delta_N_ph"]
+            true_spikes = sim_result["spikes"]
+            dt_decode = config.dt
+            time_signal = time_raw
+
+            # Compress to match optical integration time (1 ms)
+            if use_integration_compression and config.dt < config.optical.integration_time:
+                compression_factor = int(round(config.optical.integration_time / config.dt))
+                clean_signal = compress_to_integration_time(
+                    clean_signal,
+                    dt=config.dt,
+                    integration_time=config.optical.integration_time,
+                    method="max"
+                )
+                true_spikes = compress_spikes_to_integration(true_spikes, compression_factor)
+                dt_decode = config.optical.integration_time
+                time_signal = np.arange(0, len(clean_signal) * dt_decode, dt_decode)
+
+            # Baseline photon count for shot-noise consistency
+            baseline_photons = physics._compute_baseline_photons()
+            if dt_decode != config.optical.integration_time:
+                baseline_photons *= (dt_decode / config.optical.integration_time)
+
             # Add noise
             noise_params = NoiseParams(
+                shot_noise_enabled=enable_shot_noise,
                 thermal_noise_std=thermal_noise,
-                drift_amplitude=drift_amplitude,
-                seed=42
+                drift_amplitude=drift_amplitude if enable_drift else 0.0,
+                burst_probability=burst_probability,
+                burst_amplitude=burst_amplitude,
+                burst_duration_ms=burst_duration_ms,
+                intensity_fluctuation_std=intensity_std,
+                seed=sim_seed
             )
             noise_gen = AdversarialNoiseGenerator(noise_params)
             corrupted = noise_gen.corrupt_signal(
-                sim_result["delta_N_ph"], 
-                config.dt,
-                baseline=1e5
+                clean_signal,
+                dt_decode,
+                baseline=baseline_photons
             )
-            
+
             # Inverse model (decoder)
-            decoder = SignalExtractor(DecodingParams(
-                spike_threshold=4.0,
+            decode_params = DecodingParams(
+                highpass_freq=1.0,
+                lowpass_freq=300.0,
+                filter_order=4,
+                spike_threshold=3.5,
                 spike_refractory_ms=6.0,
+                detect_polarity="both",
+                artifact_threshold=6.0,
+                artifact_interpolate=False,
                 use_matched_filter=True,
                 use_wiener=True
-            ))
-            decoded = decoder.process_batch(corrupted["noisy_signal"], config.dt)
-            
+            )
+            window_samples = int(round(decode_params.matched_filter_window_ms / dt_decode))
+            template = None
+            if decode_params.use_matched_filter:
+                # Build a matched-filter template from a separate run to avoid leakage
+                np.random.seed(sim_seed + 1)
+                template_duration = min(200.0, duration_live)
+                template_config = SimulationConfig(
+                    duration=template_duration,
+                    num_particles=particles_live,
+                    dt=dt_live
+                )
+                template_physics = NeuroSwarmPhysics(template_config)
+                template_result = template_physics.simulate(input_rate_hz=input_rate)
+                template_signal = template_result["delta_N_ph"]
+                template_spikes = template_result["spikes"]
+                if use_integration_compression and dt_live < template_config.optical.integration_time:
+                    template_signal = compress_to_integration_time(
+                        template_signal,
+                        dt=dt_live,
+                        integration_time=template_config.optical.integration_time,
+                        method="max"
+                    )
+                    template_spikes = compress_spikes_to_integration(
+                        template_spikes,
+                        int(round(template_config.optical.integration_time / dt_live))
+                    )
+                template = extract_spike_template(
+                    template_signal,
+                    np.where(template_spikes)[0],
+                    window_samples
+                )
+            if template is not None:
+                decode_params.matched_filter_template = template
+
+            decoder = SignalExtractor(decode_params)
+            decoded = decoder.process_batch(
+                corrupted["noisy_signal"],
+                dt_ms=dt_decode,
+                baseline_photons=baseline_photons
+            )
+
             # Evaluation
+            tolerance_samples = max(
+                1,
+                int(5.0 / dt_decode),
+                int(0.5 * decoder.params.matched_filter_window_ms / dt_decode)
+            )
             summary = summarize_detection(
                 decoder,
                 decoded["spike_indices"],
-                sim_result["spikes"],
+                true_spikes,
                 decoded["preprocessed"],
-                dt_ms=config.dt,
-                tolerance_samples=max(
-                    1,
-                    int(5.0 / config.dt),
-                    int(0.5 * decoder.params.matched_filter_window_ms / config.dt)
-                )
+                dt_ms=dt_decode,
+                tolerance_samples=tolerance_samples,
+                baseline_photons=baseline_photons
             )
 
-            tolerance_samples = max(
-                1,
-                int(5.0 / config.dt),
-                int(0.5 * decoder.params.matched_filter_window_ms / config.dt)
-            )
             eval_metrics = decoder.evaluate_reconstruction(
                 decoded["spike_indices"],
-                sim_result["spikes"],
+                true_spikes,
                 tolerance_samples=tolerance_samples
             )
-            true_indices = np.where(sim_result["spikes"])[0]
+            true_indices = np.where(true_spikes)[0]
             timing_errors = []
             for det in decoded["spike_indices"]:
                 if len(true_indices) == 0:
                     break
                 closest = true_indices[np.argmin(np.abs(true_indices - det))]
-                timing_errors.append(abs(closest - det) * config.dt)
+                timing_errors.append(abs(closest - det) * dt_decode)
             timing_errors = np.array(timing_errors, dtype=float)
             std_timing_error_ms = float(np.std(timing_errors)) if timing_errors.size else float("nan")
             
             # Display results
             st.subheader("Simulation Results")
+            if fast_mode:
+                st.caption(
+                    f"Fast Mode active: dt={dt_live:.1f} ms, "
+                    f"particles={particles_live}, duration={duration_live:.0f} ms."
+                )
             
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("True Spikes", int(np.sum(sim_result["spikes"])))
+            col1.metric("True Spikes", int(np.sum(true_spikes)))
             col2.metric("Detected Spikes", len(decoded["spike_indices"]))
             col3.metric("F1 Score", f"{summary.f1_score:.3f}")
             col4.metric("SSNR", f"{decoded['metrics'].ssnr:.2e}")
             
             # Plot results
             fig, axes = plt.subplots(4, 1, figsize=(12, 10), facecolor='#0b1020')
-            time = sim_result["time"]
+            time = time_raw
             
             for ax in axes:
                 ax.set_facecolor('#121a2d')
@@ -756,27 +1075,27 @@ with tab4:
                     spine.set_color('white')
             
             # Plot 1: Membrane potential
-            axes[0].plot(time, sim_result["membrane_potential"], color='#4ECDC4', linewidth=0.8)
-            spike_times = time[sim_result["spikes"]]
+            axes[0].plot(time, membrane_raw, color='#4ECDC4', linewidth=0.8)
+            spike_times = time_raw[sim_result["spikes"]]
             axes[0].scatter(spike_times, np.ones_like(spike_times) * 30, 
                            color='#FF6B6B', s=50, marker='v', zorder=5)
             axes[0].set_ylabel('V (mV)', color='white')
             axes[0].set_title('Membrane Potential (Izhikevich Model)', color='white', fontweight='bold')
             
             # Plot 2: Clean photon signal
-            axes[1].plot(time, sim_result["delta_N_ph"], color='#FFEAA7', linewidth=0.8)
+            axes[1].plot(time_signal, clean_signal, color='#FFEAA7', linewidth=0.8)
             axes[1].set_ylabel('Delta N_ph', color='white')
             axes[1].set_title('Clean Differential Photon Count', color='white', fontweight='bold')
             
             # Plot 3: Noisy signal
-            axes[2].plot(time, corrupted["noisy_signal"], color='#DDA0DD', linewidth=0.5, alpha=0.8)
+            axes[2].plot(time_signal, corrupted["noisy_signal"], color='#DDA0DD', linewidth=0.5, alpha=0.8)
             axes[2].set_ylabel('Delta N_ph (noisy)', color='white')
             axes[2].set_title('Noisy Signal (After Adversarial Corruption)', color='white', fontweight='bold')
             
             # Plot 4: Decoded spikes
-            axes[3].plot(time[:len(decoded["preprocessed"])], decoded["preprocessed"], 
+            axes[3].plot(time_signal[:len(decoded["preprocessed"])], decoded["preprocessed"], 
                         color='#96CEB4', linewidth=0.8)
-            detected_times = time[decoded["spike_indices"]]
+            detected_times = time_signal[decoded["spike_indices"]]
             axes[3].scatter(detected_times, 
                            decoded["preprocessed"][decoded["spike_indices"]],
                            color='#FF6B6B', s=80, marker='*', zorder=5, label='Detected')

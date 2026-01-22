@@ -81,7 +81,7 @@ def generate_presentation_data(
         VisualizationData containing all data for plotting
     """
     from .types import SimulationConfig, ParticleDistributionParams
-    from .physics import NeuroSwarmPhysics
+    from .physics import NeuroSwarmPhysics, compress_to_integration_time
     from .noise import AdversarialNoiseGenerator, NoiseParams
     from .decoding import SignalExtractor, DecodingParams
 
@@ -109,6 +109,30 @@ def generate_presentation_data(
     clean_signal = sim_result["delta_N_ph"]
     physics_ssnr = sim_result["ssnr"]
 
+    # Compress to match optical integration time (1 ms)
+    integration_ms = config.optical.integration_time
+    if dt_ms < integration_ms:
+        factor = int(round(integration_ms / dt_ms))
+        clean_signal = compress_to_integration_time(
+            clean_signal,
+            dt=dt_ms,
+            integration_time=integration_ms,
+            method="max"
+        )
+        membrane_potential = compress_to_integration_time(
+            membrane_potential,
+            dt=dt_ms,
+            integration_time=integration_ms,
+            method="max"
+        )
+        n_bins = len(true_spikes) // factor
+        if n_bins > 0:
+            trimmed = true_spikes[:n_bins * factor]
+            reshaped = trimmed.reshape(n_bins, factor)
+            true_spikes = np.any(reshaped, axis=1)
+        dt_ms = integration_ms
+        time_ms = np.arange(0, len(clean_signal) * dt_ms, dt_ms)
+
     n_true_spikes = np.sum(true_spikes)
     logger.info(f"Physics simulation: {n_true_spikes} spikes, clean SSNR={physics_ssnr:.2e}")
 
@@ -130,6 +154,8 @@ def generate_presentation_data(
 
     # Compute baseline photon count for shot noise
     baseline_photons = physics._compute_baseline_photons()
+    if dt_ms != config.optical.integration_time:
+        baseline_photons *= (dt_ms / config.optical.integration_time)
     logger.info(f"Baseline photon count: {baseline_photons:.2e}")
 
     noise_result = noise_gen.corrupt_signal(
@@ -145,18 +171,34 @@ def generate_presentation_data(
     # --- STEP 3: Decode the noisy signal ---
     decode_params = DecodingParams(
         highpass_freq=1.0,
-        lowpass_freq=150.0,
+        lowpass_freq=300.0,
         filter_order=4,
         detrend_method="linear",
-        artifact_threshold=4.0,
+        artifact_threshold=6.0,
+        artifact_interpolate=False,
         spike_threshold=3.5,
-        spike_refractory_ms=3.0,
+        spike_refractory_ms=4.0,
+        detect_polarity="both",
         target_resolution_ms=1.0,
         use_matched_filter=use_matched_filter,
         matched_filter_window_ms=6.0,
         use_wiener=use_wiener,
         wiener_noise_floor=1e-6,
     )
+
+    # Build a matched-filter template from the clean signal
+    window_samples = int(round(decode_params.matched_filter_window_ms / dt_ms))
+    if window_samples > 0 and np.any(true_spikes):
+        spike_idx = int(np.where(true_spikes)[0][0])
+        half = window_samples // 2
+        start = spike_idx - half
+        end = start + window_samples
+        template = np.zeros(window_samples, dtype=float)
+        src_start = max(0, start)
+        src_end = min(len(clean_signal), end)
+        dst_start = src_start - start
+        template[dst_start:dst_start + (src_end - src_start)] = clean_signal[src_start:src_end]
+        decode_params.matched_filter_template = template
 
     extractor = SignalExtractor(decode_params)
     decode_result = extractor.process_batch(
