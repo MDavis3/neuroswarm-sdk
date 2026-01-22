@@ -1,59 +1,25 @@
-# Neuro-SWARM³ SDK
+﻿# Neuro-SWARM3 SDK
 
-A production-grade Python library for simulating and decoding backscattered NIR-II signals from electro-plasmonic nanoparticle probes for wireless neural activity recording.
+A Python toolkit for simulating and decoding backscattered NIR-II signals from electro-plasmonic nanoparticle probes for wireless neural activity readout.
 
-## Overview
+This repository focuses on **clarity first**: how the forward model is built, how noise corrupts the signal, and how the decoder recovers spikes.
 
-Neuro-SWARM³ (Neurophotonic Solution-dispersible Wireless Activity Reporter for Massively Multiplexed Measurements) enables remote detection of in vivo bioelectric signals using near-infrared light (NIR-II, 1000-1700 nm). This SDK provides:
+## What this repo includes
 
-1. **Forward Model (`physics.py`)**: Simulates the biological and physical ground truth
-   - Izhikevich neuron model for realistic membrane potential dynamics
-   - Drude-Lorentz dielectric function for PEDOT:PSS electrochromic response
-   - Mie theory-based scattering calculations for core-shell nanoparticles
-   - Equation (1) implementation for differential photon count (ΔN_ph)
-
-2. **Inverse Model (`decoding.py`)**: Production-adjacent signal extraction
-   - Bandpass filtering and artifact removal
-   - PCA/ICA-based neural signal separation
-   - Spike detection at 1 ms temporal resolution
-   - Per-batch SSNR validation logging
-
-3. **Adversarial Testing (`noise.py`)**: Robustness validation
-   - Shot noise injection (Poisson statistics)
-   - Low-frequency drift simulation
-   - Burst artifact generation
-
-4. **Robustness Enhancements**
-   - Matched filter spike detection for heavy noise
-   - Wiener deconvolution for noise-optimal recovery
-   - Wavelength sweep for NIR-II optimization
-   - Spatial particle distribution modeling
-   - Stress-test reporting outputs
-
-## Technical Specifications
-
-### Nanoparticle Geometry
-| Layer | Material | Dimension |
-|-------|----------|-----------|
-| Core | SiOx (silica) | 63 nm radius |
-| Shell | Au (gold) | 5 nm thickness |
-| Coating | PEDOT:PSS | 15 nm thickness |
-
-### PEDOT:PSS Drude-Lorentz Parameters (300K, NIR-II)
-| Parameter | Symbol | Value |
-|-----------|--------|-------|
-| High-frequency permittivity | ε∞ | 2.75 |
-| Plasma frequency | ωp | 1.325 eV |
-| Drude damping | γ | 0.271 eV |
-| Lorentz oscillator strength | f₁ | 0.098 |
-| Lorentz resonance frequency | ωL1 | 1.505 eV |
-| Lorentz damping | γL1 | 1.048 eV |
-
-### Key Performance Targets
-- **SSNR**: ~10³ (signal-to-shot noise ratio)
-- **Temporal Resolution**: 1 ms
-- **Field Sensitivity**: Up to 40% modulation at 12 mV/nm
-- **Scattering Cross-section**: ~10⁴ nm²
+- Forward model (`src/neuroswarm/physics.py`)
+  - Izhikevich neuron dynamics
+  - Drude-Lorentz dielectric response (PEDOT:PSS)
+  - Simplified Mie scattering
+  - Differential photon count (Equation 1)
+- Inverse model (`src/neuroswarm/decoding.py`)
+  - Filtering, artifact handling, spike detection
+  - Optional matched filter and Wiener deconvolution
+- Noise model (`src/neuroswarm/noise.py`)
+  - Shot noise, thermal noise, drift, burst artifacts
+- Visualization utilities (`src/neuroswarm/visualization.py`)
+  - Generate presentation-ready figures from real simulations
+- Streamlit dashboard (`app.py`)
+  - Interactive exploration and plots
 
 ## Installation
 
@@ -63,250 +29,104 @@ cd neuroswarm-sdk
 pip install -r requirements.txt
 ```
 
-## Quick Start
+## Quick start (forward -> noise -> decode)
 
 ```python
 from neuroswarm import NeuroSwarmPhysics, SignalExtractor, AdversarialNoiseGenerator
 
-# 1. Generate synthetic neural signal (Forward Model)
+# Forward model (clean signal)
 physics = NeuroSwarmPhysics()
-result = physics.simulate()
+sim = physics.simulate(input_rate_hz=10)
+clean = sim["delta_N_ph"]
 
-clean_signal = result["delta_N_ph"]
-time_ms = result["time_ms"]
+# Add realistic noise
+noise = AdversarialNoiseGenerator()
+noisy = noise.corrupt_signal(clean, dt=physics.config.dt)["noisy_signal"]
 
-# 2. Inject realistic noise for testing
-noise_gen = AdversarialNoiseGenerator()
-noisy_signal = noise_gen.inject(clean_signal, dt_ms=0.1)
-
-# 3. Extract spikes from noisy signal (Inverse Model)
+# Decode spikes
 extractor = SignalExtractor()
-extraction = extractor.extract(noisy_signal, dt_ms=0.1)
+decoded = extractor.process_batch(noisy, dt_ms=physics.config.dt)
 
-print(f"Detected {len(extraction.spike_times_ms)} spikes")
-print(f"SSNR: {extraction.ssnr:.1f}")
+print(f"Detected spikes: {len(decoded['spike_indices'])}")
+print(f"SSNR: {decoded['metrics'].ssnr:.2f}")
 ```
 
-## Robustness Enhancements
-
-Example using Wiener + matched filter for heavy noise:
+## Wavelength sweep
 
 ```python
-from neuroswarm.decoding import SignalExtractor, DecodingParams
+from neuroswarm import NeuroSwarmPhysics, WavelengthSweepParams
 
-params = DecodingParams(
-    use_wiener=True,
-    use_matched_filter=True,
-    matched_filter_window_ms=6.0,
-)
-extractor = SignalExtractor(params)
-result = extractor.process_batch(noisy_signal, dt_ms=0.1)
+physics = NeuroSwarmPhysics()
+report = physics.sweep_wavelengths(WavelengthSweepParams(step_nm=25.0))
+print("Optimal wavelength:", report["optimal_wavelength_nm"], "nm")
 ```
 
-## Project Structure
-
-```
-neuroswarm-sdk/
-├── app.py                  # Streamlit interactive dashboard
-├── src/
-│   └── neuroswarm/
-│       ├── __init__.py
-│       ├── types.py        # Type-safe dataclasses (geometry, Drude-Lorentz params)
-│       ├── physics.py      # Forward model (Izhikevich + Drude-Lorentz + Eq. 1)
-│       ├── decoding.py     # Inverse model (SignalExtractor with PCA/ICA)
-│       ├── noise.py        # Adversarial noise generators
-│       └── reporting.py    # Stress-test reporting utilities
-├── scripts/
-│   └── generate_visuals.py # Generate presentation plots
-├── assets/
-│   └── visuals/            # Pre-generated presentation plots
-├── tests/
-│   ├── test_physics.py     # Equation (1) validation
-│   ├── test_decoding.py    # Spike recovery under noise
-│   ├── test_noise.py       # Noise injection statistics
-│   └── test_reporting.py   # Reporting utilities tests
-├── requirements.txt
-└── README.md
-```
-
-## Core Equations
-
-### Equation (1): Differential Photon Count
-From Hardy et al. (2021):
-
-$$\Delta N_{ph} = I_{inc} \cdot (\Delta Q_{sca} \cdot \pi r^2) \cdot \frac{\lambda}{hc} \cdot \eta \cdot T \cdot t_{int}$$
-
-Where:
-- $I_{inc}$: Incident light intensity (10 mW/mm²)
-- $\Delta Q_{sca}$: Change in scattering cross section
-- $r$: Nanoparticle radius
-- $\lambda$: Probing wavelength (1050 nm)
-- $\eta$: Solid angle fraction (NA = 0.9)
-- $T$: Detection efficiency (0.5)
-- $t_{int}$: Integration time (1 ms)
-
-### Signal-to-Shot Noise Ratio
-$$SSNR = \frac{\Delta S}{S_0} \cdot \sqrt{N_{ph}}$$
-
-Target: SSNR ~ 10³ with 10³ probes at 10 mW/mm² illumination.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Forward Model (physics.py)              │
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐  │
-│  │  Izhikevich  │──▶│ Drude-Lorentz│──▶│  Equation (1)  │  │
-│  │   Neuron     │   │   ε(ω, E)    │   │    ΔN_ph       │  │
-│  └──────────────┘   └──────────────┘   └───────┬────────┘  │
-└───────────────────────────────────────────────┼────────────┘
-                                                │ Clean Signal
-                                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Noise Injection (noise.py)                  │
-│  ┌────────────┐  ┌────────────┐  ┌────────────────────────┐│
-│  │ Shot Noise │  │   Drift    │  │   Burst Artifacts     ││
-│  │  (Poisson) │  │ (0.1 Hz)   │  │   (EMG, movement)     ││
-│  └────────────┘  └────────────┘  └────────────────────────┘│
-└───────────────────────────────────────────────┬────────────┘
-                                                │ Noisy Signal
-                                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Inverse Model (decoding.py)                │
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────────┐  │
-│  │  Bandpass    │──▶│   PCA/ICA    │──▶│    Spike       │  │
-│  │  Filter      │   │  Separation  │   │   Detection    │  │
-│  └──────────────┘   └──────────────┘   └───────┬────────┘  │
-│                                                │            │
-│                      SSNR Logging ◀────────────┘            │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Interactive Dashboard
-
-Launch the Streamlit-based visualization dashboard:
+## Dashboard
 
 ```bash
 streamlit run app.py
 ```
 
-Features:
-- 📊 **Pipeline Overview**: Visual diagram of the forward/inverse model pipeline
-- 🌈 **Wavelength Sweep**: Optimize detection wavelength in the NIR-II window
-- 📉 **Noise Robustness**: Test decoder performance across noise levels
-- 🔬 **Live Simulation**: Run end-to-end simulations with configurable parameters
+Tabs:
+- Pipeline Overview
+- Wavelength Sweep
+- Noise Robustness
+- Live Simulation
 
-## Presentation Visuals
+## Presentation figures
 
-Pre-generated plots are available in `assets/visuals/`:
-- `pipeline_diagram.png` — End-to-end signal processing pipeline
-- `wavelength_sweep.png` — Optimal wavelength in NIR-II range
-- `noise_robustness.png` — Decoder F1 vs noise level
+Generate presentation-ready plots from real simulations:
 
-Regenerate with:
 ```bash
-PYTHONPATH=src python scripts/generate_visuals.py
+python scripts/generate_presentation_figures.py --output-dir figures --no-show
 ```
 
-## Testing
+This produces:
+- `figure1_adversarial_environment.png`
+- `figure2_decoding_extraction.png`
+- `figure3_performance_summary.png`
+
+## Key defaults (from paper/patent context)
+
+- NIR-II window: 1000 to 1700 nm
+- Nominal resonance around 1050 nm
+- Particle geometry: 63 nm core, 5 nm shell, 15 nm coating
+- Target SSNR: around 10^3 under typical conditions
+
+## Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-Tests validate:
-- Equation (1) numerics against published values
-- Drude-Lorentz output in NIR-II wavelength range
-- Spike recovery accuracy under injected noise
-- SSNR targets from Section III of the paper
+## Project structure
 
-## Benchmark Results
-
-Performance of spike detection under varying noise conditions:
-
-| Thermal Noise (σ) | Standard Decoder | Robust Decoder | Improvement |
-|-------------------|------------------|----------------|-------------|
-| 100               | F1 = 0.82        | F1 = 0.91      | +11%        |
-| 200               | F1 = 0.71        | F1 = 0.86      | +21%        |
-| 300               | F1 = 0.58        | F1 = 0.79      | +36%        |
-| 500               | F1 = 0.42        | F1 = 0.68      | +62%        |
-
-**Test conditions:**
-- 1000 nanoparticle probes
-- 10 Hz neural input rate
-- 500 ms simulation duration
-- Robust decoder: Matched filter + Wiener deconvolution enabled
-
-The robust decoder (matched filter + Wiener) maintains F1 > 0.65 even under heavy noise where the standard decoder degrades significantly.
-
-## Signal Processing Pipeline
-
-Detailed walkthrough of the decoding algorithm in `decoding.py`:
-
-### 1. Preprocessing
 ```
-Raw Signal → Bandpass Filter → Detrend → Artifact Removal → Clean Signal
+neuroswarm-sdk/
+|-- app.py
+|-- src/
+|   `-- neuroswarm/
+|       |-- __init__.py
+|       |-- types.py
+|       |-- physics.py
+|       |-- decoding.py
+|       |-- noise.py
+|       |-- reporting.py
+|       `-- visualization.py
+|-- scripts/
+|   `-- generate_presentation_figures.py
+|-- assets/
+|   `-- visuals/
+|-- tests/
+|-- requirements.txt
+`-- README.md
 ```
-- **Bandpass filter**: 1–200 Hz, 4th-order Butterworth (zero-phase)
-- **Detrend**: Linear drift removal
-- **Artifact detection**: MAD-based robust statistics (5σ threshold)
-- **Artifact handling**: Linear interpolation over flagged regions
-
-### 2. Feature Extraction (Multi-channel)
-```
-Clean Signal → PCA (95% variance) → ICA (source separation) → Components
-```
-- **PCA**: Dimensionality reduction, retains 95% cumulative variance
-- **ICA**: FastICA for blind source separation (optional, for multi-channel)
-
-### 3. Spike Detection
-```
-Preprocessed → Threshold (3σ) → Refractory Filter (2ms) → Spike Times
-```
-- **Threshold**: 3σ above noise floor (~0.13% false positive rate)
-- **Refractory period**: 2 ms (matches neuronal absolute refractory)
-- **Matched filter** (optional): Template correlation for heavy noise
-
-### 4. Output
-- Spike times at 1 ms temporal resolution
-- Per-batch SSNR validation logged
-- Precision/Recall/F1 metrics computed against ground truth
-
-### Algorithm Design Rationale
-
-| Choice | Justification |
-|--------|---------------|
-| 4th-order Butterworth | Sharp cutoff (24 dB/oct) without passband ripple |
-| MAD for artifact detection | Robust to 50% outlier contamination (unlike std) |
-| 3σ spike threshold | P(false positive) ≈ 0.13% for Gaussian noise |
-| 2 ms refractory | Matches physiological absolute refractory period |
-| Zero-phase filtering | Preserves spike timing (no phase delay) |
-
-## Dependencies
-
-- `numpy>=1.24.0` — Array operations, Drude-Lorentz math
-- `scipy>=1.10.0` — Signal filtering, numerical methods
-- `scikit-learn>=1.3.0` — PCA/ICA decomposition
-- `matplotlib>=3.7.0` — Visualization and plotting
-- `streamlit>=1.28.0` — Interactive dashboard
-- `pytest>=7.4.0` — Testing framework
 
 ## References
 
-1. Hardy, N., Habib, A., Ivanov, T., & Yanik, A. A. (2021). Neuro-SWARM³: System-on-a-Nanoparticle for Wireless Recording of Brain Activity. *IEEE Photonics Technology Letters*, 33(16), 900-903.
-
-2. Izhikevich, E. M. (2003). Simple model of spiking neurons. *IEEE Transactions on Neural Networks*, 14(6), 1569-1572.
-
-3. Du, Y., et al. (2018). Dielectric properties of DMSO-doped-PEDOT:PSS at THz frequencies. *Physica Status Solidi*, 255(4), 1700547.
+1. Hardy, N., Habib, A., Ivanov, T., Yanik, A. A. (2021). Neuro-SWARM3: System-on-a-Nanoparticle for Wireless Recording of Brain Activity. IEEE Photonics Technology Letters, 33(16), 900-903.
+2. Izhikevich, E. M. (2003). Simple model of spiking neurons. IEEE Transactions on Neural Networks, 14(6), 1569-1572.
 
 ## License
 
-MIT License
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/improvement`)
-3. Commit changes (`git commit -am 'Add new feature'`)
-4. Push to branch (`git push origin feature/improvement`)
-5. Open a Pull Request
+MIT
